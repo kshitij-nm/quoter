@@ -12,22 +12,22 @@ class Product:
     price_l3: float = 0.0
     supplier: str = ""
     supplier_contact: str = ""
-    # New Fields for the updated layouts
     make: str = ""
     model: str = ""
     specification: str = ""
     skillset: str = ""
+    # New Field: Auto-defaults to today's date (YYYY-MM-DD) if none is provided
+    last_updated: str = field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d"))
 
 @dataclass
 class QuoteItem:
     product: Product
     quantity: int
     discount_percent: float = 0.0
-    service_level: int = 1  # Tracks which level is selected (1, 2, or 3)
+    service_level: int = 1  
     
     @property
     def active_price(self) -> float:
-        """Returns the correct price based on the selected service level."""
         if self.product.category.strip().lower() == 'service':
             if self.service_level == 2:
                 return self.product.price_l2

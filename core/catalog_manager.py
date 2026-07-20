@@ -1,5 +1,6 @@
 import logging
 import pandas as pd
+from datetime import datetime
 from typing import List
 from .models import Product
 
@@ -14,6 +15,14 @@ class CatalogManager:
             df = pd.read_excel(self.filepath, engine='openpyxl')
             products = []
             for _, row in df.iterrows():
+                
+                # Safely parse the date, fallback to today if missing
+                raw_date = row.get('Last Updated', '')
+                if pd.isna(raw_date) or not str(raw_date).strip():
+                    date_str = datetime.now().strftime("%Y-%m-%d")
+                else:
+                    date_str = str(raw_date).split()[0] # clean up time if present
+                    
                 products.append(Product(
                     name=str(row.get('Name', '')),
                     category=str(row.get('Category', '')),
@@ -26,7 +35,8 @@ class CatalogManager:
                     make=str(row.get('Make', '')),
                     model=str(row.get('Model', '')),
                     specification=str(row.get('Specification', '')),
-                    skillset=str(row.get('SkillSet', ''))
+                    skillset=str(row.get('SkillSet', '')),
+                    last_updated=date_str
                 ))
             return products
         except FileNotFoundError:
@@ -45,7 +55,8 @@ class CatalogManager:
             "Make": p.make,
             "Model": p.model,
             "Specification": p.specification,
-            "SkillSet": p.skillset
+            "SkillSet": p.skillset,
+            "Last Updated": p.last_updated
         } for p in products]
         
         df = pd.DataFrame(data)

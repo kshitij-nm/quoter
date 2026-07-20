@@ -188,7 +188,6 @@ class ProductDatabaseView(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(30, 30, 30, 30)
         
-        # --- Header ---
         header = QHBoxLayout()
         self.title_label = QLabel("Product Database", objectName="h1")
         header.addWidget(self.title_label)
@@ -211,10 +210,9 @@ class ProductDatabaseView(QWidget):
         header.addWidget(self.btn_save)
         layout.addLayout(header)
         
-        # --- Filters ---
         filter_layout = QHBoxLayout()
         self.search_box = QLineEdit()
-        self.search_box.setPlaceholderText("Search by Name...")
+        self.search_box.setPlaceholderText("Search by Name, Category, or Supplier...")
         self.search_box.textChanged.connect(self.apply_filters)
         
         self.category_cb = QComboBox()
@@ -232,19 +230,17 @@ class ProductDatabaseView(QWidget):
         filter_layout.addStretch()
         layout.addLayout(filter_layout)
         
-        # --- Table (12 Columns) ---
-        self.table = QTableWidget(0, 12) 
+        # --- Table (13 Columns) ---
+        self.table = QTableWidget(0, 13) 
         self.table.setHorizontalHeaderLabels([
             "Select", "NAME & DESC", "CATEGORY", "MAKE", "MODEL", "SPECIFICATION", 
-            "SKILLSET", "L1 / BASE (₹)", "L2 (₹)", "L3 (₹)", "SUPPLIER", "CONTACT INFO"
+            "SKILLSET", "L1 / BASE (₹)", "L2 (₹)", "L3 (₹)", "SUPPLIER", "CONTACT INFO", "LAST UPDATED"
         ])
         
-        # Because 12 columns is a lot, we use Interactive so you can scroll horizontally 
-        # instead of stretching them all into unreadable mush.
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
         self.table.horizontalHeader().setStretchLastSection(True)
-        self.table.horizontalHeader().resizeSection(0, 50)  # Checkbox
-        self.table.horizontalHeader().resizeSection(1, 200) # Name
+        self.table.horizontalHeader().resizeSection(0, 50)  
+        self.table.horizontalHeader().resizeSection(1, 200) 
         
         self.table.setColumnHidden(0, True)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -252,7 +248,6 @@ class ProductDatabaseView(QWidget):
         self.table.setSortingEnabled(True) 
         layout.addWidget(self.table)
         
-        # --- Selection Footer ---
         self.footer = QHBoxLayout()
         self.footer.addStretch()
         self.btn_cancel = QPushButton("Cancel")
@@ -286,23 +281,17 @@ class ProductDatabaseView(QWidget):
         search = self.search_box.text().lower()
         cat = self.category_cb.currentText()
         sup = self.supplier_cb.currentText()
-        
         filtered = []
         for p in self.all_products:
-            # Check if the search text is in the name, category, OR supplier
             match_search = (
                 search in p.name.lower() or 
                 search in p.category.lower() or 
                 search in p.supplier.lower()
             )
-            
-            # The dropdowns still act as strict filters on top of the search box
             match_cat = (cat == "All Categories" or p.category == cat)
             match_sup = (sup == "All Suppliers" or p.supplier == sup)
-            
             if match_search and match_cat and match_sup:
                 filtered.append(p)
-                
         self.populate_table(filtered)
 
     def populate_table(self, products):
@@ -314,7 +303,6 @@ class ProductDatabaseView(QWidget):
             chk.setCheckState(Qt.Unchecked)
             self.table.setItem(row, 0, chk)
             
-            # Map all 11 data columns
             self.table.setItem(row, 1, QTableWidgetItem(p.name))
             self.table.setItem(row, 2, QTableWidgetItem(p.category))
             self.table.setItem(row, 3, QTableWidgetItem(p.make))
@@ -336,6 +324,8 @@ class ProductDatabaseView(QWidget):
             
             self.table.setItem(row, 10, QTableWidgetItem(p.supplier))
             self.table.setItem(row, 11, QTableWidgetItem(p.supplier_contact))
+            self.table.setItem(row, 12, QTableWidgetItem(p.last_updated)) # New date column
+            
         self.table.setSortingEnabled(True)
 
     def on_cell_clicked(self, row, col):
@@ -383,7 +373,8 @@ class ProductDatabaseView(QWidget):
                     price_l2=float(self.table.item(row, 8).text() or 0) if self.table.item(row, 8) else 0.0,
                     price_l3=float(self.table.item(row, 9).text() or 0) if self.table.item(row, 9) else 0.0,
                     supplier=self.table.item(row, 10).text() if self.table.item(row, 10) else "",
-                    supplier_contact=self.table.item(row, 11).text() if self.table.item(row, 11) else ""
+                    supplier_contact=self.table.item(row, 11).text() if self.table.item(row, 11) else "",
+                    last_updated=self.table.item(row, 12).text() if self.table.item(row, 12) else datetime.now().strftime("%Y-%m-%d")
                 )
                 selected.append(p)
         self.disable_selection_mode()
@@ -401,6 +392,9 @@ class ProductDatabaseView(QWidget):
         self.table.insertRow(row)
         for c in range(1, 12):
             self.table.setItem(row, c, QTableWidgetItem(""))
+            
+        # Automatically insert today's date in the new row
+        self.table.setItem(row, 12, QTableWidgetItem(datetime.now().strftime("%Y-%m-%d")))
         self.table.setSortingEnabled(True)
 
     def save_database(self):
@@ -408,6 +402,9 @@ class ProductDatabaseView(QWidget):
         for row in range(self.table.rowCount()):
             pname = self.table.item(row, 1)
             if pname and pname.text().strip():
+                # Check if user manually modified the date, else use today's date
+                date_val = self.table.item(row, 12).text() if self.table.item(row, 12) and self.table.item(row, 12).text().strip() else datetime.now().strftime("%Y-%m-%d")
+                
                 products.append(Product(
                     name=pname.text(),
                     category=self.table.item(row, 2).text() if self.table.item(row, 2) else "",
@@ -420,8 +417,10 @@ class ProductDatabaseView(QWidget):
                     price_l2=float(self.table.item(row, 8).text() or 0) if self.table.item(row, 8) else 0.0,
                     price_l3=float(self.table.item(row, 9).text() or 0) if self.table.item(row, 9) else 0.0,
                     supplier=self.table.item(row, 10).text() if self.table.item(row, 10) else "",
-                    supplier_contact=self.table.item(row, 11).text() if self.table.item(row, 11) else ""
+                    supplier_contact=self.table.item(row, 11).text() if self.table.item(row, 11) else "",
+                    last_updated=date_val
                 ))
+                
         self.catalog.save_catalog(products)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.btn_save.hide()

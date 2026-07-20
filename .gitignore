@@ -4,3 +4,4 @@ Scripts/
 pyvenv.cfg
 demo.py
 output/
+core/__pycache__/
