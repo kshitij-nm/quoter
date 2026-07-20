@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QStackedWidget, QFrame, QLineEdit, QTableWidget,
     QTableWidgetItem, QHeaderView, QComboBox, QGridLayout, QAbstractItemView, 
-    QDialog, QSpinBox, QDoubleSpinBox, QMessageBox, QInputDialog, QFileDialog
+    QDialog, QSpinBox, QDoubleSpinBox, QMessageBox, QInputDialog, QFileDialog, QTabWidget
 )
 from PySide6.QtCore import Qt
 
@@ -188,6 +188,7 @@ class ProductDatabaseView(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(30, 30, 30, 30)
         
+        # --- Header ---
         header = QHBoxLayout()
         self.title_label = QLabel("Product Database", objectName="h1")
         header.addWidget(self.title_label)
@@ -210,6 +211,7 @@ class ProductDatabaseView(QWidget):
         header.addWidget(self.btn_save)
         layout.addLayout(header)
         
+        # --- Filters ---
         filter_layout = QHBoxLayout()
         self.search_box = QLineEdit()
         self.search_box.setPlaceholderText("Search by Name, Category, or Supplier...")
@@ -217,7 +219,6 @@ class ProductDatabaseView(QWidget):
         
         self.category_cb = QComboBox()
         self.category_cb.currentTextChanged.connect(self.apply_filters)
-        
         self.supplier_cb = QComboBox()
         self.supplier_cb.currentTextChanged.connect(self.apply_filters)
         
@@ -230,24 +231,38 @@ class ProductDatabaseView(QWidget):
         filter_layout.addStretch()
         layout.addLayout(filter_layout)
         
-        # --- Table (13 Columns) ---
-        self.table = QTableWidget(0, 13) 
-        self.table.setHorizontalHeaderLabels([
-            "Select", "NAME & DESC", "CATEGORY", "MAKE", "MODEL", "SPECIFICATION", 
-            "SKILLSET", "L1 / BASE (₹)", "L2 (₹)", "L3 (₹)", "SUPPLIER", "CONTACT INFO", "LAST UPDATED"
+        # --- Tabs ---
+        self.tabs = QTabWidget()
+        
+        # TAB 1: PRODUCTS (Non-Service)
+        self.tab_products = QWidget()
+        prod_layout = QVBoxLayout(self.tab_products)
+        prod_layout.setContentsMargins(0, 10, 0, 0)
+        self.products_table = QTableWidget(0, 10)
+        self.products_table.setHorizontalHeaderLabels([
+            "Select", "NAME", "CATEGORY", "MAKE", "MODEL", "SPECIFICATION", 
+            "PRICE (₹)", "SUPPLIER", "CONTACT INFO", "LAST UPDATED"
         ])
+        self.setup_table(self.products_table)
+        prod_layout.addWidget(self.products_table)
+        self.tabs.addTab(self.tab_products, "🛒 Products")
+
+        # TAB 2: SERVICES
+        self.tab_services = QWidget()
+        serv_layout = QVBoxLayout(self.tab_services)
+        serv_layout.setContentsMargins(0, 10, 0, 0)
+        self.services_table = QTableWidget(0, 10)
+        self.services_table.setHorizontalHeaderLabels([
+            "Select", "NAME", "CATEGORY", "SKILLSET", "L1 / BASE (₹)", 
+            "L2 (₹)", "L3 (₹)", "SUPPLIER", "CONTACT INFO", "LAST UPDATED"
+        ])
+        self.setup_table(self.services_table)
+        serv_layout.addWidget(self.services_table)
+        self.tabs.addTab(self.tab_services, "🛠 Services")
+
+        layout.addWidget(self.tabs)
         
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
-        self.table.horizontalHeader().setStretchLastSection(True)
-        self.table.horizontalHeader().resizeSection(0, 50)  
-        self.table.horizontalHeader().resizeSection(1, 200) 
-        
-        self.table.setColumnHidden(0, True)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.cellClicked.connect(self.on_cell_clicked)
-        self.table.setSortingEnabled(True) 
-        layout.addWidget(self.table)
-        
+        # --- Selection Footer ---
         self.footer = QHBoxLayout()
         self.footer.addStretch()
         self.btn_cancel = QPushButton("Cancel")
@@ -262,6 +277,18 @@ class ProductDatabaseView(QWidget):
         self.footer_widget.setLayout(self.footer)
         self.footer_widget.hide()
         layout.addWidget(self.footer_widget)
+
+    def setup_table(self, table):
+        """Helper to apply standard styling to both tables."""
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        table.horizontalHeader().setStretchLastSection(True)
+        table.horizontalHeader().resizeSection(0, 50)  
+        table.horizontalHeader().resizeSection(1, 200) 
+        table.setColumnHidden(0, True)
+        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        table.setSortingEnabled(True)
+        # Pass the specific table into the cell click handler
+        table.cellClicked.connect(lambda row, col, t=table: self.on_cell_clicked(row, col, t))
 
     def load_data(self):
         self.all_products = self.catalog.load_catalog()
@@ -281,56 +308,81 @@ class ProductDatabaseView(QWidget):
         search = self.search_box.text().lower()
         cat = self.category_cb.currentText()
         sup = self.supplier_cb.currentText()
-        filtered = []
+        
+        prods = []
+        servs = []
+        
         for p in self.all_products:
-            match_search = (
-                search in p.name.lower() or 
-                search in p.category.lower() or 
-                search in p.supplier.lower()
-            )
+            match_search = (search in p.name.lower() or search in p.category.lower() or search in p.supplier.lower())
             match_cat = (cat == "All Categories" or p.category == cat)
             match_sup = (sup == "All Suppliers" or p.supplier == sup)
+            
             if match_search and match_cat and match_sup:
-                filtered.append(p)
-        self.populate_table(filtered)
+                if p.category.strip().lower() == 'service':
+                    servs.append(p)
+                else:
+                    prods.append(p)
+                    
+        self.populate_tables(prods, servs)
 
-    def populate_table(self, products):
-        self.table.setSortingEnabled(False) 
-        self.table.setRowCount(len(products))
+    def populate_tables(self, products, services):
+        self.products_table.setSortingEnabled(False)
+        self.services_table.setSortingEnabled(False)
+        
+        # Populate Products Tab
+        self.products_table.setRowCount(len(products))
         for row, p in enumerate(products):
             chk = QTableWidgetItem()
             chk.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
             chk.setCheckState(Qt.Unchecked)
-            self.table.setItem(row, 0, chk)
+            self.products_table.setItem(row, 0, chk)
+            self.products_table.setItem(row, 1, QTableWidgetItem(p.name))
+            self.products_table.setItem(row, 2, QTableWidgetItem(p.category))
+            self.products_table.setItem(row, 3, QTableWidgetItem(p.make))
+            self.products_table.setItem(row, 4, QTableWidgetItem(p.model))
+            self.products_table.setItem(row, 5, QTableWidgetItem(p.specification))
             
-            self.table.setItem(row, 1, QTableWidgetItem(p.name))
-            self.table.setItem(row, 2, QTableWidgetItem(p.category))
-            self.table.setItem(row, 3, QTableWidgetItem(p.make))
-            self.table.setItem(row, 4, QTableWidgetItem(p.model))
-            self.table.setItem(row, 5, QTableWidgetItem(p.specification))
-            self.table.setItem(row, 6, QTableWidgetItem(p.skillset))
+            price_item = QTableWidgetItem()
+            price_item.setData(Qt.DisplayRole, p.unit_price)
+            self.products_table.setItem(row, 6, price_item)
             
-            p1_item = QTableWidgetItem()
-            p1_item.setData(Qt.DisplayRole, p.unit_price)
-            self.table.setItem(row, 7, p1_item)
-            
-            p2_item = QTableWidgetItem()
-            p2_item.setData(Qt.DisplayRole, p.price_l2)
-            self.table.setItem(row, 8, p2_item)
-            
-            p3_item = QTableWidgetItem()
-            p3_item.setData(Qt.DisplayRole, p.price_l3)
-            self.table.setItem(row, 9, p3_item)
-            
-            self.table.setItem(row, 10, QTableWidgetItem(p.supplier))
-            self.table.setItem(row, 11, QTableWidgetItem(p.supplier_contact))
-            self.table.setItem(row, 12, QTableWidgetItem(p.last_updated)) # New date column
-            
-        self.table.setSortingEnabled(True)
+            self.products_table.setItem(row, 7, QTableWidgetItem(p.supplier))
+            self.products_table.setItem(row, 8, QTableWidgetItem(p.supplier_contact))
+            self.products_table.setItem(row, 9, QTableWidgetItem(p.last_updated))
 
-    def on_cell_clicked(self, row, col):
+        # Populate Services Tab
+        self.services_table.setRowCount(len(services))
+        for row, s in enumerate(services):
+            chk = QTableWidgetItem()
+            chk.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            chk.setCheckState(Qt.Unchecked)
+            self.services_table.setItem(row, 0, chk)
+            self.services_table.setItem(row, 1, QTableWidgetItem(s.name))
+            self.services_table.setItem(row, 2, QTableWidgetItem(s.category))
+            self.services_table.setItem(row, 3, QTableWidgetItem(s.skillset))
+            
+            l1_item = QTableWidgetItem()
+            l1_item.setData(Qt.DisplayRole, s.unit_price)
+            self.services_table.setItem(row, 4, l1_item)
+            
+            l2_item = QTableWidgetItem()
+            l2_item.setData(Qt.DisplayRole, s.price_l2)
+            self.services_table.setItem(row, 5, l2_item)
+            
+            l3_item = QTableWidgetItem()
+            l3_item.setData(Qt.DisplayRole, s.price_l3)
+            self.services_table.setItem(row, 6, l3_item)
+            
+            self.services_table.setItem(row, 7, QTableWidgetItem(s.supplier))
+            self.services_table.setItem(row, 8, QTableWidgetItem(s.supplier_contact))
+            self.services_table.setItem(row, 9, QTableWidgetItem(s.last_updated))
+
+        self.products_table.setSortingEnabled(True)
+        self.services_table.setSortingEnabled(True)
+
+    def on_cell_clicked(self, row, col, table):
         if self.selection_mode and col != 0:
-            chk = self.table.item(row, 0)
+            chk = table.item(row, 0)
             if chk:
                 new_state = Qt.Checked if chk.checkState() == Qt.Unchecked else Qt.Unchecked
                 chk.setCheckState(new_state)
@@ -339,7 +391,8 @@ class ProductDatabaseView(QWidget):
         self.selection_mode = True
         self.title_label.setText("Select Products for Quote")
         self.btn_edit.hide()
-        self.table.setColumnHidden(0, False)
+        self.products_table.setColumnHidden(0, False)
+        self.services_table.setColumnHidden(0, False)
         self.footer_widget.show()
         self.load_data()
 
@@ -351,78 +404,122 @@ class ProductDatabaseView(QWidget):
         self.selection_mode = False
         self.title_label.setText("Product Database")
         self.btn_edit.show()
-        self.table.setColumnHidden(0, True)
+        self.products_table.setColumnHidden(0, True)
+        self.services_table.setColumnHidden(0, True)
         self.footer_widget.hide()
-        for row in range(self.table.rowCount()):
-            if self.table.item(row, 0):
-                self.table.item(row, 0).setCheckState(Qt.Unchecked)
+        
+        for table in [self.products_table, self.services_table]:
+            for row in range(table.rowCount()):
+                if table.item(row, 0):
+                    table.item(row, 0).setCheckState(Qt.Unchecked)
 
     def process_selection(self):
         selected = []
-        for row in range(self.table.rowCount()):
-            if self.table.item(row, 0) and self.table.item(row, 0).checkState() == Qt.Checked:
-                p = Product(
-                    name=self.table.item(row, 1).text() if self.table.item(row, 1) else "",
-                    category=self.table.item(row, 2).text() if self.table.item(row, 2) else "",
-                    make=self.table.item(row, 3).text() if self.table.item(row, 3) else "",
-                    model=self.table.item(row, 4).text() if self.table.item(row, 4) else "",
-                    specification=self.table.item(row, 5).text() if self.table.item(row, 5) else "",
-                    skillset=self.table.item(row, 6).text() if self.table.item(row, 6) else "",
+        # Grab from Products Table
+        for row in range(self.products_table.rowCount()):
+            if self.products_table.item(row, 0) and self.products_table.item(row, 0).checkState() == Qt.Checked:
+                selected.append(Product(
+                    name=self.products_table.item(row, 1).text() if self.products_table.item(row, 1) else "",
+                    category=self.products_table.item(row, 2).text() if self.products_table.item(row, 2) else "",
+                    make=self.products_table.item(row, 3).text() if self.products_table.item(row, 3) else "",
+                    model=self.products_table.item(row, 4).text() if self.products_table.item(row, 4) else "",
+                    specification=self.products_table.item(row, 5).text() if self.products_table.item(row, 5) else "",
                     description="",
-                    unit_price=float(self.table.item(row, 7).text() or 0) if self.table.item(row, 7) else 0.0,
-                    price_l2=float(self.table.item(row, 8).text() or 0) if self.table.item(row, 8) else 0.0,
-                    price_l3=float(self.table.item(row, 9).text() or 0) if self.table.item(row, 9) else 0.0,
-                    supplier=self.table.item(row, 10).text() if self.table.item(row, 10) else "",
-                    supplier_contact=self.table.item(row, 11).text() if self.table.item(row, 11) else "",
-                    last_updated=self.table.item(row, 12).text() if self.table.item(row, 12) else datetime.now().strftime("%Y-%m-%d")
-                )
-                selected.append(p)
+                    unit_price=float(self.products_table.item(row, 6).text() or 0) if self.products_table.item(row, 6) else 0.0,
+                    supplier=self.products_table.item(row, 7).text() if self.products_table.item(row, 7) else "",
+                    supplier_contact=self.products_table.item(row, 8).text() if self.products_table.item(row, 8) else "",
+                    last_updated=self.products_table.item(row, 9).text() if self.products_table.item(row, 9) else datetime.now().strftime("%Y-%m-%d")
+                ))
+                
+        # Grab from Services Table
+        for row in range(self.services_table.rowCount()):
+            if self.services_table.item(row, 0) and self.services_table.item(row, 0).checkState() == Qt.Checked:
+                selected.append(Product(
+                    name=self.services_table.item(row, 1).text() if self.services_table.item(row, 1) else "",
+                    category=self.services_table.item(row, 2).text() if self.services_table.item(row, 2) else "",
+                    skillset=self.services_table.item(row, 3).text() if self.services_table.item(row, 3) else "",
+                    description="",
+                    unit_price=float(self.services_table.item(row, 4).text() or 0) if self.services_table.item(row, 4) else 0.0,
+                    price_l2=float(self.services_table.item(row, 5).text() or 0) if self.services_table.item(row, 5) else 0.0,
+                    price_l3=float(self.services_table.item(row, 6).text() or 0) if self.services_table.item(row, 6) else 0.0,
+                    supplier=self.services_table.item(row, 7).text() if self.services_table.item(row, 7) else "",
+                    supplier_contact=self.services_table.item(row, 8).text() if self.services_table.item(row, 8) else "",
+                    last_updated=self.services_table.item(row, 9).text() if self.services_table.item(row, 9) else datetime.now().strftime("%Y-%m-%d")
+                ))
+                
         self.disable_selection_mode()
         self.main_window.finish_product_selection(selected)
 
     def toggle_edit_mode(self):
-        self.table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
+        self.products_table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
+        self.services_table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
         self.btn_edit.hide()
         self.btn_save.show()
         self.btn_add_row.show()
 
     def add_empty_row(self):
-        self.table.setSortingEnabled(False)
-        row = self.table.rowCount()
-        self.table.insertRow(row)
-        for c in range(1, 12):
-            self.table.setItem(row, c, QTableWidgetItem(""))
+        """Adds a row to whichever tab is currently active."""
+        if self.tabs.currentIndex() == 0:
+            target_table = self.products_table
+        else:
+            target_table = self.services_table
             
-        # Automatically insert today's date in the new row
-        self.table.setItem(row, 12, QTableWidgetItem(datetime.now().strftime("%Y-%m-%d")))
-        self.table.setSortingEnabled(True)
+        target_table.setSortingEnabled(False)
+        row = target_table.rowCount()
+        target_table.insertRow(row)
+        for c in range(1, 10):
+            target_table.setItem(row, c, QTableWidgetItem(""))
+            
+        target_table.setItem(row, 9, QTableWidgetItem(datetime.now().strftime("%Y-%m-%d")))
+        target_table.setSortingEnabled(True)
 
     def save_database(self):
-        products = []
-        for row in range(self.table.rowCount()):
-            pname = self.table.item(row, 1)
+        final_list = []
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        
+        # Read Products
+        for row in range(self.products_table.rowCount()):
+            pname = self.products_table.item(row, 1)
             if pname and pname.text().strip():
-                # Check if user manually modified the date, else use today's date
-                date_val = self.table.item(row, 12).text() if self.table.item(row, 12) and self.table.item(row, 12).text().strip() else datetime.now().strftime("%Y-%m-%d")
-                
-                products.append(Product(
+                date_val = self.products_table.item(row, 9).text() if self.products_table.item(row, 9) and self.products_table.item(row, 9).text().strip() else today_str
+                final_list.append(Product(
                     name=pname.text(),
-                    category=self.table.item(row, 2).text() if self.table.item(row, 2) else "",
-                    make=self.table.item(row, 3).text() if self.table.item(row, 3) else "",
-                    model=self.table.item(row, 4).text() if self.table.item(row, 4) else "",
-                    specification=self.table.item(row, 5).text() if self.table.item(row, 5) else "",
-                    skillset=self.table.item(row, 6).text() if self.table.item(row, 6) else "",
-                    description="",
-                    unit_price=float(self.table.item(row, 7).text() or 0) if self.table.item(row, 7) else 0.0,
-                    price_l2=float(self.table.item(row, 8).text() or 0) if self.table.item(row, 8) else 0.0,
-                    price_l3=float(self.table.item(row, 9).text() or 0) if self.table.item(row, 9) else 0.0,
-                    supplier=self.table.item(row, 10).text() if self.table.item(row, 10) else "",
-                    supplier_contact=self.table.item(row, 11).text() if self.table.item(row, 11) else "",
-                    last_updated=date_val
+                    category=self.products_table.item(row, 2).text() if self.products_table.item(row, 2) else "",
+                    make=self.products_table.item(row, 3).text() if self.products_table.item(row, 3) else "",
+                    model=self.products_table.item(row, 4).text() if self.products_table.item(row, 4) else "",
+                    specification=self.products_table.item(row, 5).text() if self.products_table.item(row, 5) else "",
+                    unit_price=float(self.products_table.item(row, 6).text() or 0) if self.products_table.item(row, 6) else 0.0,
+                    supplier=self.products_table.item(row, 7).text() if self.products_table.item(row, 7) else "",
+                    supplier_contact=self.products_table.item(row, 8).text() if self.products_table.item(row, 8) else "",
+                    last_updated=date_val,
+                    description=""
                 ))
                 
-        self.catalog.save_catalog(products)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        # Read Services
+        for row in range(self.services_table.rowCount()):
+            sname = self.services_table.item(row, 1)
+            if sname and sname.text().strip():
+                date_val = self.services_table.item(row, 9).text() if self.services_table.item(row, 9) and self.services_table.item(row, 9).text().strip() else today_str
+                
+                cat_val = self.services_table.item(row, 2).text() if self.services_table.item(row, 2) else ""
+                if not cat_val: cat_val = "Service" # Ensure it gets caught as a service
+                
+                final_list.append(Product(
+                    name=sname.text(),
+                    category=cat_val,
+                    skillset=self.services_table.item(row, 3).text() if self.services_table.item(row, 3) else "",
+                    unit_price=float(self.services_table.item(row, 4).text() or 0) if self.services_table.item(row, 4) else 0.0,
+                    price_l2=float(self.services_table.item(row, 5).text() or 0) if self.services_table.item(row, 5) else 0.0,
+                    price_l3=float(self.services_table.item(row, 6).text() or 0) if self.services_table.item(row, 6) else 0.0,
+                    supplier=self.services_table.item(row, 7).text() if self.services_table.item(row, 7) else "",
+                    supplier_contact=self.services_table.item(row, 8).text() if self.services_table.item(row, 8) else "",
+                    last_updated=date_val,
+                    description=""
+                ))
+                
+        self.catalog.save_catalog(final_list)
+        self.products_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.services_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.btn_save.hide()
         self.btn_add_row.hide()
         self.btn_edit.show()
