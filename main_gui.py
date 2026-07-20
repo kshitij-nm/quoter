@@ -895,7 +895,11 @@ class NewQuotationView(QWidget):
         return os.path.join(folder, f"{default_name}_{count}.xlsx")
 
     def save_draft(self):
-        if not self.engine.current_quote: return
+        # Prevent saving if the quote doesn't exist or has no items
+        if not self.engine.current_quote or not self.engine.current_quote.items:
+            QMessageBox.warning(self, "Empty Quote", "Please add at least one product or service before saving a draft.")
+            return
+            
         default = self.client_name.text() or self.quote_num.text()
         name, ok = QInputDialog.getText(self, "Save Draft", "Draft Name:", QLineEdit.Normal, default)
         
@@ -910,7 +914,11 @@ class NewQuotationView(QWidget):
                     QMessageBox.critical(self, "Template Error", str(e))
 
     def export_final(self):
-        if not self.engine.current_quote: return
+        # Prevent exporting if the quote doesn't exist or has no items
+        if not self.engine.current_quote or not self.engine.current_quote.items:
+            QMessageBox.warning(self, "Empty Quote", "Please add at least one product or service before exporting.")
+            return
+            
         filepath = self.handle_save_overwrite("output", self.quote_num.text())
         if filepath:
             try:
