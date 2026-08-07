@@ -16,9 +16,9 @@ class Product:
     model: str = ""
     specification: str = ""
     skillset: str = ""
-    discount: float = 0.0  # NEW: Base discount %
-    reference: str = ""    # NEW: Blank reference field
-    last_updated: str = field(default_factory=lambda: datetime.now().strftime("%d-%m-%y"))
+    discount: float = 0.0  
+    reference: str = ""    
+    last_updated: str = field(default_factory=lambda: datetime.now().strftime("%d-%m-%Y"))
 
 @dataclass
 class QuoteItem:
@@ -28,7 +28,6 @@ class QuoteItem:
     service_level: int = 1  
     
     def __post_init__(self):
-        # Automatically pull the product's default discount if not explicitly changed in cart
         if self.discount_percent == -1.0:
             self.discount_percent = self.product.discount
 
@@ -43,7 +42,6 @@ class QuoteItem:
 
     @property
     def subtotal(self) -> float:
-        # Subtracts the discount percentage from the base total
         base_price = self.active_price * self.quantity
         discount_amount = base_price * (self.discount_percent / 100)
         return round(base_price - discount_amount, 2)
@@ -60,16 +58,7 @@ class Quotation:
     client: ClientDetails
     date: datetime = field(default_factory=datetime.now)
     items: List[QuoteItem] = field(default_factory=list)
-    tax_rate: float = 0.0
     
     @property
-    def subtotal(self) -> float:
-        return sum(item.subtotal for item in self.items)
-        
-    @property
-    def tax_amount(self) -> float:
-        return round(self.subtotal * self.tax_rate, 2)
-        
-    @property
     def total(self) -> float:
-        return round(self.subtotal + self.tax_amount, 2)
+        return round(sum(item.subtotal for item in self.items), 2)

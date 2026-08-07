@@ -27,7 +27,7 @@ class CatalogManager:
                 for _, row in df.iterrows():
                     raw_date = row.get('Last Updated', '')
                     if not str(raw_date).strip():
-                        date_str = datetime.now().strftime("%d-%m-%y")
+                        date_str = datetime.now().strftime("%d-%m-%Y")
                     else:
                         date_str = str(raw_date).split()[0]
                         
@@ -56,8 +56,8 @@ class CatalogManager:
                         model=str(row.get('Model', '')),
                         specification=str(row.get('Specification', '')),
                         skillset=str(row.get('SkillSet', '')),
-                        discount=parse_float(row.get('Discount (%)', 0.0)),  # Read Discount
-                        reference=str(row.get('Reference', '')),             # Read Reference
+                        discount=parse_float(row.get('Discount (%)', 0.0)),  
+                        reference=str(row.get('Reference', '')),             
                         last_updated=date_str
                     ))
             return products

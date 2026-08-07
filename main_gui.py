@@ -112,21 +112,11 @@ class CartDialog(QDialog):
         
         bottom_bar = QHBoxLayout()
         summary_l = QGridLayout()
-        summary_l.addWidget(QLabel("Subtotal:"), 0, 0)
-        self.lbl_subtotal = QLabel("₹0.00", alignment=Qt.AlignRight)
-        summary_l.addWidget(self.lbl_subtotal, 0, 1)
         
-        summary_l.addWidget(QLabel("Tax Rate %:"), 1, 0)
-        self.tax_spinner = QDoubleSpinBox()
-        self.tax_spinner.setRange(0, 100)
-        current_cart = self.engine.get_cart(self.customer_name)
-        self.tax_spinner.setValue(current_cart.tax_rate * 100)
-        self.tax_spinner.valueChanged.connect(self.update_tax)
-        summary_l.addWidget(self.tax_spinner, 1, 1)
-        
-        summary_l.addWidget(QLabel("Total Value:", objectName="h2"), 2, 0)
+        # Simplified totals view
+        summary_l.addWidget(QLabel("Total Value:", objectName="h2"), 0, 0)
         self.lbl_total = QLabel("₹0.00", objectName="stat_val", alignment=Qt.AlignRight)
-        summary_l.addWidget(self.lbl_total, 2, 1)
+        summary_l.addWidget(self.lbl_total, 0, 1)
         
         bottom_bar.addLayout(summary_l)
         bottom_bar.addStretch()
@@ -138,11 +128,6 @@ class CartDialog(QDialog):
         btn_export.clicked.connect(self.export_final)
         bottom_bar.addWidget(btn_export)
         layout.addLayout(bottom_bar)
-        self.refresh_ui()
-
-    def update_tax(self):
-        cart = self.engine.get_cart(self.customer_name)
-        cart.tax_rate = self.tax_spinner.value() / 100.0
         self.refresh_ui()
 
     def update_qty(self, absolute_index, new_qty):
@@ -224,7 +209,6 @@ class CartDialog(QDialog):
                 target_table.setCellWidget(current_row, 6, btn_del)
                 p_row += 1
             
-        self.lbl_subtotal.setText(f"₹{cart.subtotal:,.2f}")
         self.lbl_total.setText(f"₹{cart.total:,.2f}")
 
     def export_final(self):
@@ -322,8 +306,7 @@ class DashboardView(QWidget):
                                 for p_val in row:
                                     if isinstance(p_val, (int, float)): total = float(p_val)
                     
-                    # Strictly formats file modification time as dd-mm-yy
-                    date_str = datetime.fromtimestamp(os.path.getmtime(path)).strftime('%d-%m-%y')
+                    date_str = datetime.fromtimestamp(os.path.getmtime(path)).strftime('%d-%m-%Y')
                     history.append({
                         "id": qid, "client": client, "total": total, 
                         "date": date_str, "timestamp": os.path.getmtime(path)
@@ -553,9 +536,8 @@ class ProductDatabaseView(QWidget):
             return
             
         self._is_loading = True
-        # STRICT DATE UPDATE: Only update date if the Price column (6) changes
         if col == 6:
-            self.products_table.setItem(row, 11, QTableWidgetItem(datetime.now().strftime("%d-%m-%y")))
+            self.products_table.setItem(row, 11, QTableWidgetItem(datetime.now().strftime("%d-%m-%Y")))
         
         self.save_database()
         self._is_loading = False
@@ -567,9 +549,8 @@ class ProductDatabaseView(QWidget):
             return
             
         self._is_loading = True
-        # STRICT DATE UPDATE: Only update date if Price columns (4, 5, or 6) change
         if col in [4, 5, 6]:
-            self.services_table.setItem(row, 11, QTableWidgetItem(datetime.now().strftime("%d-%m-%y")))
+            self.services_table.setItem(row, 11, QTableWidgetItem(datetime.now().strftime("%d-%m-%Y")))
         
         self.save_database()
         self._is_loading = False
@@ -587,11 +568,10 @@ class ProductDatabaseView(QWidget):
         chk.setCheckState(Qt.Unchecked)
         target_table.setItem(row, 0, chk)
         
-        # Pre-fill all new cells as empty text items, except for the Date at index 11
         for c in range(1, 11):
             target_table.setItem(row, c, QTableWidgetItem(""))
             
-        target_table.setItem(row, 11, QTableWidgetItem(datetime.now().strftime("%d-%m-%y")))
+        target_table.setItem(row, 11, QTableWidgetItem(datetime.now().strftime("%d-%m-%Y")))
         target_table.setSortingEnabled(True)
         self._is_loading = False
 
@@ -706,7 +686,7 @@ class ProductDatabaseView(QWidget):
 
     def save_database(self):
         final_list = []
-        today_str = datetime.now().strftime("%d-%m-%y")
+        today_str = datetime.now().strftime("%d-%m-%Y")
         
         for row in range(self.products_table.rowCount()):
             pname = self.products_table.item(row, 1)
