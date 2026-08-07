@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List
 from datetime import datetime
 
 @dataclass
@@ -7,7 +7,7 @@ class Product:
     name: str
     category: str
     description: str
-    unit_price: float  # Base Price / Level 1
+    unit_price: float 
     price_l2: float = 0.0
     price_l3: float = 0.0
     supplier: str = ""
@@ -16,16 +16,22 @@ class Product:
     model: str = ""
     specification: str = ""
     skillset: str = ""
-    # New Field: Auto-defaults to today's date (YYYY-MM-DD) if none is provided
-    last_updated: str = field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d"))
+    discount: float = 0.0  # NEW: Base discount %
+    reference: str = ""    # NEW: Blank reference field
+    last_updated: str = field(default_factory=lambda: datetime.now().strftime("%d-%m-%y"))
 
 @dataclass
 class QuoteItem:
     product: Product
     quantity: int
-    discount_percent: float = 0.0
+    discount_percent: float = -1.0 
     service_level: int = 1  
     
+    def __post_init__(self):
+        # Automatically pull the product's default discount if not explicitly changed in cart
+        if self.discount_percent == -1.0:
+            self.discount_percent = self.product.discount
+
     @property
     def active_price(self) -> float:
         if self.product.category.strip().lower() == 'service':
@@ -37,6 +43,7 @@ class QuoteItem:
 
     @property
     def subtotal(self) -> float:
+        # Subtracts the discount percentage from the base total
         base_price = self.active_price * self.quantity
         discount_amount = base_price * (self.discount_percent / 100)
         return round(base_price - discount_amount, 2)

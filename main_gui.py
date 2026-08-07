@@ -31,7 +31,6 @@ DARK_THEME = {
 
 def get_stylesheet(is_dark: bool) -> str:
     theme = DARK_THEME if is_dark else LIGHT_THEME
-    
     svg_check = "data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'%3E%3C/polyline%3E%3C/svg%3E"
     
     return f"""
@@ -50,13 +49,9 @@ def get_stylesheet(is_dark: bool) -> str:
         border: 1px solid {theme['border']}; 
         border-radius: 8px; 
         gridline-color: {theme['border']}; 
-        outline: none; /* Removes the dotted focus artifact completely */
+        outline: none; 
     }}
-    QTableView::item:focus {{
-        outline: none;
-        border: none;
-    }}
-    
+    QTableView::item:focus {{ outline: none; border: none; }}
     QHeaderView::section {{ background-color: {theme['surface']}; color: {theme['text_muted']}; font-weight: bold; padding: 4px; border: none; border-bottom: 1px solid {theme['border']}; }}
     QLabel#h1 {{ font-size: 24px; font-weight: bold; }}
     QLabel#h2 {{ font-size: 18px; font-weight: bold; }}
@@ -66,19 +61,8 @@ def get_stylesheet(is_dark: bool) -> str:
     QTabBar::tab {{ background: {theme['bg']}; border: 1px solid {theme['border']}; padding: 8px 16px; border-top-left-radius: 4px; border-top-right-radius: 4px; }}
     QTabBar::tab:selected {{ background: {theme['surface']}; font-weight: bold; border-bottom: 2px solid {theme['primary']}; }}
     
-    QTableView::indicator {{
-        width: 18px;
-        height: 18px;
-        border: 2px solid #94A3B8;
-        border-radius: 4px;
-        background-color: {theme['surface']};
-        margin-left: 6px; /* Perfectly centers the box in the tiny column */
-    }}
-    QTableView::indicator:checked {{
-        background-color: {theme['primary']};
-        border: 2px solid {theme['primary']};
-        image: url("{svg_check}");
-    }}
+    QTableView::indicator {{ width: 18px; height: 18px; border: 2px solid #94A3B8; border-radius: 4px; background-color: {theme['surface']}; margin-left: 6px; }}
+    QTableView::indicator:checked {{ background-color: {theme['primary']}; border: 2px solid {theme['primary']}; image: url("{svg_check}"); }}
     """
 
 # ==========================================
@@ -92,10 +76,9 @@ class CartDialog(QDialog):
         self.parent_dashboard = parent_dashboard
         
         self.setWindowTitle(f"Shopping Cart - {self.customer_name}")
-        self.resize(1000, 700)
+        self.resize(1100, 700)
         
         layout = QVBoxLayout(self)
-        
         header = QHBoxLayout()
         header.addWidget(QLabel(f"Cart for: {self.customer_name}", objectName="h1"))
         header.addStretch()
@@ -106,22 +89,24 @@ class CartDialog(QDialog):
         layout.addLayout(header)
         
         layout.addWidget(QLabel("Products", objectName="h2"))
-        self.products_table = QTableWidget(0, 6)
-        self.products_table.setHorizontalHeaderLabels(["#", "DESCRIPTION", "QTY", "PRICE (L1)", "TOTAL", "ACT"])
+        self.products_table = QTableWidget(0, 7)
+        self.products_table.setHorizontalHeaderLabels(["#", "DESCRIPTION", "QTY", "PRICE (L1)", "DISC %", "TOTAL", "ACT"])
         self.products_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.products_table.horizontalHeader().resizeSection(0, 40)
         self.products_table.horizontalHeader().resizeSection(2, 60)
-        self.products_table.horizontalHeader().resizeSection(5, 50)
+        self.products_table.horizontalHeader().resizeSection(4, 60)
+        self.products_table.horizontalHeader().resizeSection(6, 50)
         self.products_table.verticalHeader().setVisible(False)
         layout.addWidget(self.products_table)
         
         layout.addWidget(QLabel("Services", objectName="h2"))
-        self.services_table = QTableWidget(0, 7)
-        self.services_table.setHorizontalHeaderLabels(["#", "DESCRIPTION", "SERVICE LVL", "QTY", "PRICE", "TOTAL", "ACT"])
+        self.services_table = QTableWidget(0, 8)
+        self.services_table.setHorizontalHeaderLabels(["#", "DESCRIPTION", "SERVICE LVL", "QTY", "PRICE", "DISC %", "TOTAL", "ACT"])
         self.services_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.services_table.horizontalHeader().resizeSection(0, 40)
-        self.services_table.horizontalHeader().resizeSection(3, 60) 
-        self.services_table.horizontalHeader().resizeSection(6, 50) 
+        self.services_table.horizontalHeader().resizeSection(3, 60)
+        self.services_table.horizontalHeader().resizeSection(5, 60)
+        self.services_table.horizontalHeader().resizeSection(7, 50) 
         self.services_table.verticalHeader().setVisible(False)
         layout.addWidget(self.services_table)
         
@@ -152,7 +137,6 @@ class CartDialog(QDialog):
         btn_export.setMinimumWidth(200)
         btn_export.clicked.connect(self.export_final)
         bottom_bar.addWidget(btn_export)
-        
         layout.addLayout(bottom_bar)
         self.refresh_ui()
 
@@ -164,6 +148,11 @@ class CartDialog(QDialog):
     def update_qty(self, absolute_index, new_qty):
         cart = self.engine.get_cart(self.customer_name)
         cart.items[absolute_index].quantity = new_qty
+        self.refresh_ui()
+        
+    def update_discount(self, absolute_index, new_disc):
+        cart = self.engine.get_cart(self.customer_name)
+        cart.items[absolute_index].discount_percent = new_disc
         self.refresh_ui()
 
     def update_service_level(self, absolute_index, combo_box_text):
@@ -205,6 +194,15 @@ class CartDialog(QDialog):
             qty_spin.setValue(item.quantity)
             qty_spin.valueChanged.connect(lambda val, idx=absolute_idx: self.update_qty(idx, val))
             
+            disc_spin = QDoubleSpinBox()
+            disc_spin.setRange(0, 100)
+            disc_spin.setValue(item.discount_percent)
+            disc_spin.valueChanged.connect(lambda val, idx=absolute_idx: self.update_discount(idx, val))
+            
+            btn_del = QPushButton("X")
+            btn_del.setObjectName("danger_btn")
+            btn_del.clicked.connect(lambda checked, idx=absolute_idx: self.delete_item(idx))
+            
             if is_service:
                 lvl_combo = QComboBox()
                 lvl_combo.addItems(["Level 1", "Level 2", "Level 3"])
@@ -214,22 +212,16 @@ class CartDialog(QDialog):
                 target_table.setCellWidget(current_row, 2, lvl_combo)
                 target_table.setCellWidget(current_row, 3, qty_spin) 
                 target_table.setItem(current_row, 4, QTableWidgetItem(f"₹{item.active_price:,.2f}"))
-                target_table.setItem(current_row, 5, QTableWidgetItem(f"₹{item.subtotal:,.2f}"))
-                
-                btn_del = QPushButton("X")
-                btn_del.setObjectName("danger_btn")
-                btn_del.clicked.connect(lambda checked, idx=absolute_idx: self.delete_item(idx))
-                target_table.setCellWidget(current_row, 6, btn_del)
+                target_table.setCellWidget(current_row, 5, disc_spin)
+                target_table.setItem(current_row, 6, QTableWidgetItem(f"₹{item.subtotal:,.2f}"))
+                target_table.setCellWidget(current_row, 7, btn_del)
                 s_row += 1
             else:
                 target_table.setCellWidget(current_row, 2, qty_spin) 
                 target_table.setItem(current_row, 3, QTableWidgetItem(f"₹{item.active_price:,.2f}"))
-                target_table.setItem(current_row, 4, QTableWidgetItem(f"₹{item.subtotal:,.2f}"))
-                
-                btn_del = QPushButton("X")
-                btn_del.setObjectName("danger_btn")
-                btn_del.clicked.connect(lambda checked, idx=absolute_idx: self.delete_item(idx))
-                target_table.setCellWidget(current_row, 5, btn_del)
+                target_table.setCellWidget(current_row, 4, disc_spin)
+                target_table.setItem(current_row, 5, QTableWidgetItem(f"₹{item.subtotal:,.2f}"))
+                target_table.setCellWidget(current_row, 6, btn_del)
                 p_row += 1
             
         self.lbl_subtotal.setText(f"₹{cart.subtotal:,.2f}")
@@ -270,12 +262,10 @@ class DashboardView(QWidget):
         super().__init__()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(30, 30, 30, 30)
-        
         layout.addWidget(QLabel("Dashboard", objectName="h1"))
         
         stats_layout = QHBoxLayout()
         stats_layout.setSpacing(20)
-        
         self.lbl_total_prods = self._create_stat_card("TOTAL PRODUCTS", "0", "In Database")
         self.lbl_revenue = self._create_stat_card("LIFETIME REVENUE", "₹0.00", "Finalized Quotes")
         
@@ -298,14 +288,11 @@ class DashboardView(QWidget):
         card = QFrame(objectName="surface")
         card.setMinimumSize(300, 120)
         card.setMaximumWidth(400)
-        
         l = QVBoxLayout(card)
         l.setContentsMargins(25, 20, 25, 20)
         l.addWidget(QLabel(title, objectName="muted"))
-        
         val_lbl = QLabel(val, objectName="stat_val")
         l.addWidget(val_lbl)
-        
         l.addWidget(QLabel(subtitle, objectName="muted"))
         return card, val_lbl, None
 
@@ -325,7 +312,6 @@ class DashboardView(QWidget):
                     client = "Unknown"
                     qid = os.path.splitext(os.path.basename(path))[0]
                     total = 0.0
-                    
                     for row in ws.iter_rows(values_only=True):
                         for val in row:
                             if not val: continue
@@ -336,7 +322,8 @@ class DashboardView(QWidget):
                                 for p_val in row:
                                     if isinstance(p_val, (int, float)): total = float(p_val)
                     
-                    date_str = datetime.fromtimestamp(os.path.getmtime(path)).strftime('%b %d, %Y')
+                    # Strictly formats file modification time as dd-mm-yy
+                    date_str = datetime.fromtimestamp(os.path.getmtime(path)).strftime('%d-%m-%y')
                     history.append({
                         "id": qid, "client": client, "total": total, 
                         "date": date_str, "timestamp": os.path.getmtime(path)
@@ -370,26 +357,22 @@ class ProductDatabaseView(QWidget):
         
         cart_bar = QFrame(objectName="surface")
         cart_l = QHBoxLayout(cart_bar)
-        
         cart_l.addWidget(QLabel("Current Customer:"))
         self.customer_input = QLineEdit()
         self.customer_input.setPlaceholderText("Walk-in Customer")
         self.customer_input.textChanged.connect(self.update_cart_btn)
         cart_l.addWidget(self.customer_input)
-        
         cart_l.addStretch()
         
         self.btn_view_cart = QPushButton("🛒 View Cart (0)")
         self.btn_view_cart.setObjectName("primary_btn")
         self.btn_view_cart.clicked.connect(self.open_cart)
         cart_l.addWidget(self.btn_view_cart)
-        
         layout.addWidget(cart_bar)
         
         header = QHBoxLayout()
         header.addWidget(QLabel("Product Database", objectName="h1"))
         header.addStretch()
-        
         btn_add_row = QPushButton("+ Add Empty Row")
         btn_add_row.clicked.connect(self.add_empty_row)
         header.addWidget(btn_add_row)
@@ -419,14 +402,13 @@ class ProductDatabaseView(QWidget):
         layout.addLayout(filter_layout)
         
         self.tabs = QTabWidget()
-        
         self.tab_products = QWidget()
         prod_layout = QVBoxLayout(self.tab_products)
         prod_layout.setContentsMargins(0, 10, 0, 0)
-        self.products_table = QTableWidget(0, 10)
+        self.products_table = QTableWidget(0, 12)
         self.products_table.setHorizontalHeaderLabels([
             "Add", "NAME", "CATEGORY", "MAKE", "MODEL", "SPECIFICATION", 
-            "PRICE (₹)", "SUPPLIER", "CONTACT INFO", "LAST UPDATED"
+            "PRICE (₹)", "DISC (%)", "SUPPLIER", "CONTACT INFO", "REFERENCE", "LAST UPDATED"
         ])
         self.setup_table(self.products_table, self.on_product_edited)
         prod_layout.addWidget(self.products_table)
@@ -435,10 +417,10 @@ class ProductDatabaseView(QWidget):
         self.tab_services = QWidget()
         serv_layout = QVBoxLayout(self.tab_services)
         serv_layout.setContentsMargins(0, 10, 0, 0)
-        self.services_table = QTableWidget(0, 10)
+        self.services_table = QTableWidget(0, 12)
         self.services_table.setHorizontalHeaderLabels([
             "Add", "NAME", "CATEGORY", "SKILLSET", "L1 / BASE (₹)", 
-            "L2 (₹)", "L3 (₹)", "SUPPLIER", "CONTACT INFO", "LAST UPDATED"
+            "L2 (₹)", "L3 (₹)", "DISC (%)", "SUPPLIER", "CONTACT INFO", "REFERENCE", "LAST UPDATED"
         ])
         self.setup_table(self.services_table, self.on_service_edited)
         serv_layout.addWidget(self.services_table)
@@ -449,28 +431,25 @@ class ProductDatabaseView(QWidget):
     def setup_table(self, table, change_handler):
         table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
         table.horizontalHeader().setStretchLastSection(True)
-        table.horizontalHeader().resizeSection(0, 50)  
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
+        table.horizontalHeader().resizeSection(0, 35)  
         table.horizontalHeader().resizeSection(1, 200) 
+        table.verticalHeader().setVisible(False)
         table.setSortingEnabled(True)
-        
         table.setContextMenuPolicy(Qt.CustomContextMenu)
         table.customContextMenuRequested.connect(lambda pos, t=table: self.show_context_menu(pos, t))
-        
         table.cellChanged.connect(change_handler)
 
     def clear_filters(self):
         self.search_box.blockSignals(True)
         self.category_cb.blockSignals(True)
         self.supplier_cb.blockSignals(True)
-        
         self.search_box.clear()
         self.category_cb.setCurrentIndex(0)
         self.supplier_cb.setCurrentIndex(0)
-        
         self.search_box.blockSignals(False)
         self.category_cb.blockSignals(False)
         self.supplier_cb.blockSignals(False)
-        
         self.apply_filters()
 
     def show_context_menu(self, pos, table):
@@ -479,7 +458,6 @@ class ProductDatabaseView(QWidget):
             menu = QMenu(self)
             del_action = menu.addAction("🗑 Delete Row")
             action = menu.exec(table.viewport().mapToGlobal(pos))
-            
             if action == del_action:
                 reply = QMessageBox.question(self, "Verify Deletion", "Are you sure you want to permanently delete this row?", QMessageBox.Yes | QMessageBox.No)
                 if reply == QMessageBox.Yes:
@@ -491,7 +469,7 @@ class ProductDatabaseView(QWidget):
     def update_cart_btn(self):
         cust = self.customer_input.text().strip() or "Walk-in Customer"
         cart = self.engine.get_cart(cust)
-        count = len(cart.items) # Now counts line-items, not absolute quantity
+        count = len(cart.items) 
         self.btn_view_cart.setText(f"🛒 View Cart ({count})")
 
     def uncheck_all_boxes(self):
@@ -512,7 +490,6 @@ class ProductDatabaseView(QWidget):
         if not chk: return
 
         name_item = table.item(row, 1)
-        
         if not name_item or not name_item.text().strip():
             if chk.checkState() == Qt.Checked:
                 self._is_loading = True
@@ -532,12 +509,14 @@ class ProductDatabaseView(QWidget):
                         name=product_name,
                         category=table.item(row, 2).text() if table.item(row, 2) else "",
                         skillset=table.item(row, 3).text() if table.item(row, 3) else "",
-                        description="",
                         unit_price=float(table.item(row, 4).text() or 0) if table.item(row, 4) else 0.0,
                         price_l2=float(table.item(row, 5).text() or 0) if table.item(row, 5) else 0.0,
                         price_l3=float(table.item(row, 6).text() or 0) if table.item(row, 6) else 0.0,
-                        supplier=table.item(row, 7).text() if table.item(row, 7) else "",
-                        supplier_contact=table.item(row, 8).text() if table.item(row, 8) else "",
+                        discount=float(table.item(row, 7).text() or 0) if table.item(row, 7) else 0.0,
+                        supplier=table.item(row, 8).text() if table.item(row, 8) else "",
+                        supplier_contact=table.item(row, 9).text() if table.item(row, 9) else "",
+                        reference=table.item(row, 10).text() if table.item(row, 10) else "",
+                        description="",
                     )
                 else:
                     p = Product(
@@ -546,10 +525,12 @@ class ProductDatabaseView(QWidget):
                         make=table.item(row, 3).text() if table.item(row, 3) else "",
                         model=table.item(row, 4).text() if table.item(row, 4) else "",
                         specification=table.item(row, 5).text() if table.item(row, 5) else "",
-                        description="",
                         unit_price=float(table.item(row, 6).text() or 0) if table.item(row, 6) else 0.0,
-                        supplier=table.item(row, 7).text() if table.item(row, 7) else "",
-                        supplier_contact=table.item(row, 8).text() if table.item(row, 8) else "",
+                        discount=float(table.item(row, 7).text() or 0) if table.item(row, 7) else 0.0,
+                        supplier=table.item(row, 8).text() if table.item(row, 8) else "",
+                        supplier_contact=table.item(row, 9).text() if table.item(row, 9) else "",
+                        reference=table.item(row, 10).text() if table.item(row, 10) else "",
+                        description="",
                     )
                 self.engine.add_to_cart(cust, p, quantity=qty)
                 self.update_cart_btn()
@@ -557,7 +538,6 @@ class ProductDatabaseView(QWidget):
                 self._is_loading = True
                 chk.setCheckState(Qt.Unchecked)
                 self._is_loading = False
-
         else:
             cart = self.engine.get_cart(cust)
             items_to_remove = [i for i, item in enumerate(cart.items) if item.product.name == product_name]
@@ -573,7 +553,10 @@ class ProductDatabaseView(QWidget):
             return
             
         self._is_loading = True
-        self.products_table.setItem(row, 9, QTableWidgetItem(datetime.now().strftime("%Y-%m-%d")))
+        # STRICT DATE UPDATE: Only update date if the Price column (6) changes
+        if col == 6:
+            self.products_table.setItem(row, 11, QTableWidgetItem(datetime.now().strftime("%d-%m-%y")))
+        
         self.save_database()
         self._is_loading = False
 
@@ -584,7 +567,10 @@ class ProductDatabaseView(QWidget):
             return
             
         self._is_loading = True
-        self.services_table.setItem(row, 9, QTableWidgetItem(datetime.now().strftime("%Y-%m-%d")))
+        # STRICT DATE UPDATE: Only update date if Price columns (4, 5, or 6) change
+        if col in [4, 5, 6]:
+            self.services_table.setItem(row, 11, QTableWidgetItem(datetime.now().strftime("%d-%m-%y")))
+        
         self.save_database()
         self._is_loading = False
 
@@ -601,10 +587,11 @@ class ProductDatabaseView(QWidget):
         chk.setCheckState(Qt.Unchecked)
         target_table.setItem(row, 0, chk)
         
-        for c in range(1, 9):
+        # Pre-fill all new cells as empty text items, except for the Date at index 11
+        for c in range(1, 11):
             target_table.setItem(row, c, QTableWidgetItem(""))
             
-        target_table.setItem(row, 9, QTableWidgetItem(datetime.now().strftime("%Y-%m-%d")))
+        target_table.setItem(row, 11, QTableWidgetItem(datetime.now().strftime("%d-%m-%y")))
         target_table.setSortingEnabled(True)
         self._is_loading = False
 
@@ -640,10 +627,10 @@ class ProductDatabaseView(QWidget):
             make = self.products_table.item(row, 3).text() if self.products_table.item(row, 3) else ""
             model = self.products_table.item(row, 4).text() if self.products_table.item(row, 4) else ""
             spec = self.products_table.item(row, 5).text() if self.products_table.item(row, 5) else ""
-            supplier = self.products_table.item(row, 7).text() if self.products_table.item(row, 7) else ""
+            supplier = self.products_table.item(row, 8).text() if self.products_table.item(row, 8) else ""
+            reference = self.products_table.item(row, 10).text() if self.products_table.item(row, 10) else ""
             
-            massive_string = f"{name} {category} {make} {model} {spec} {supplier}".lower()
-            
+            massive_string = f"{name} {category} {make} {model} {spec} {supplier} {reference}".lower()
             match_search = (search in massive_string)
             match_cat = (cat == "All Categories" or category == cat)
             match_sup = (sup == "All Suppliers" or supplier == sup)
@@ -654,10 +641,10 @@ class ProductDatabaseView(QWidget):
             name = self.services_table.item(row, 1).text() if self.services_table.item(row, 1) else ""
             category = self.services_table.item(row, 2).text() if self.services_table.item(row, 2) else ""
             skillset = self.services_table.item(row, 3).text() if self.services_table.item(row, 3) else ""
-            supplier = self.services_table.item(row, 7).text() if self.services_table.item(row, 7) else ""
+            supplier = self.services_table.item(row, 8).text() if self.services_table.item(row, 8) else ""
+            reference = self.services_table.item(row, 10).text() if self.services_table.item(row, 10) else ""
             
-            massive_string = f"{name} {category} {skillset} {supplier}".lower()
-            
+            massive_string = f"{name} {category} {skillset} {supplier} {reference}".lower()
             match_search = (search in massive_string)
             match_cat = (cat == "All Categories" or category == cat)
             match_sup = (sup == "All Suppliers" or supplier == sup)
@@ -680,12 +667,15 @@ class ProductDatabaseView(QWidget):
             self.products_table.setItem(row, 4, QTableWidgetItem(p.model))
             self.products_table.setItem(row, 5, QTableWidgetItem(p.specification))
             
-            price_item = QTableWidgetItem()
-            price_item.setData(Qt.DisplayRole, p.unit_price)
-            self.products_table.setItem(row, 6, price_item)
-            self.products_table.setItem(row, 7, QTableWidgetItem(p.supplier))
-            self.products_table.setItem(row, 8, QTableWidgetItem(p.supplier_contact))
-            self.products_table.setItem(row, 9, QTableWidgetItem(p.last_updated))
+            p_item = QTableWidgetItem(); p_item.setData(Qt.DisplayRole, p.unit_price)
+            d_item = QTableWidgetItem(); d_item.setData(Qt.DisplayRole, p.discount)
+            
+            self.products_table.setItem(row, 6, p_item)
+            self.products_table.setItem(row, 7, d_item)
+            self.products_table.setItem(row, 8, QTableWidgetItem(p.supplier))
+            self.products_table.setItem(row, 9, QTableWidgetItem(p.supplier_contact))
+            self.products_table.setItem(row, 10, QTableWidgetItem(p.reference))
+            self.products_table.setItem(row, 11, QTableWidgetItem(p.last_updated))
 
         self.services_table.setRowCount(len(services))
         for row, s in enumerate(services):
@@ -700,25 +690,28 @@ class ProductDatabaseView(QWidget):
             l1 = QTableWidgetItem(); l1.setData(Qt.DisplayRole, s.unit_price)
             l2 = QTableWidgetItem(); l2.setData(Qt.DisplayRole, s.price_l2)
             l3 = QTableWidgetItem(); l3.setData(Qt.DisplayRole, s.price_l3)
+            disc = QTableWidgetItem(); disc.setData(Qt.DisplayRole, s.discount)
             
             self.services_table.setItem(row, 4, l1)
             self.services_table.setItem(row, 5, l2)
             self.services_table.setItem(row, 6, l3)
-            self.services_table.setItem(row, 7, QTableWidgetItem(s.supplier))
-            self.services_table.setItem(row, 8, QTableWidgetItem(s.supplier_contact))
-            self.services_table.setItem(row, 9, QTableWidgetItem(s.last_updated))
+            self.services_table.setItem(row, 7, disc)
+            self.services_table.setItem(row, 8, QTableWidgetItem(s.supplier))
+            self.services_table.setItem(row, 9, QTableWidgetItem(s.supplier_contact))
+            self.services_table.setItem(row, 10, QTableWidgetItem(s.reference))
+            self.services_table.setItem(row, 11, QTableWidgetItem(s.last_updated))
 
         self.products_table.setSortingEnabled(True)
         self.services_table.setSortingEnabled(True)
 
     def save_database(self):
         final_list = []
-        today_str = datetime.now().strftime("%Y-%m-%d")
+        today_str = datetime.now().strftime("%d-%m-%y")
         
         for row in range(self.products_table.rowCount()):
             pname = self.products_table.item(row, 1)
             if pname and pname.text().strip():
-                d_val = self.products_table.item(row, 9).text() if self.products_table.item(row, 9) and self.products_table.item(row, 9).text().strip() else today_str
+                d_val = self.products_table.item(row, 11).text() if self.products_table.item(row, 11) and self.products_table.item(row, 11).text().strip() else today_str
                 final_list.append(Product(
                     name=pname.text(),
                     category=self.products_table.item(row, 2).text() if self.products_table.item(row, 2) else "",
@@ -726,8 +719,10 @@ class ProductDatabaseView(QWidget):
                     model=self.products_table.item(row, 4).text() if self.products_table.item(row, 4) else "",
                     specification=self.products_table.item(row, 5).text() if self.products_table.item(row, 5) else "",
                     unit_price=float(self.products_table.item(row, 6).text() or 0) if self.products_table.item(row, 6) else 0.0,
-                    supplier=self.products_table.item(row, 7).text() if self.products_table.item(row, 7) else "",
-                    supplier_contact=self.products_table.item(row, 8).text() if self.products_table.item(row, 8) else "",
+                    discount=float(self.products_table.item(row, 7).text() or 0) if self.products_table.item(row, 7) else 0.0,
+                    supplier=self.products_table.item(row, 8).text() if self.products_table.item(row, 8) else "",
+                    supplier_contact=self.products_table.item(row, 9).text() if self.products_table.item(row, 9) else "",
+                    reference=self.products_table.item(row, 10).text() if self.products_table.item(row, 10) else "",
                     last_updated=d_val,
                     description=""
                 ))
@@ -735,7 +730,7 @@ class ProductDatabaseView(QWidget):
         for row in range(self.services_table.rowCount()):
             sname = self.services_table.item(row, 1)
             if sname and sname.text().strip():
-                d_val = self.services_table.item(row, 9).text() if self.services_table.item(row, 9) and self.services_table.item(row, 9).text().strip() else today_str
+                d_val = self.services_table.item(row, 11).text() if self.services_table.item(row, 11) and self.services_table.item(row, 11).text().strip() else today_str
                 c_val = self.services_table.item(row, 2).text() if self.services_table.item(row, 2) else "Service"
                 if not c_val: c_val = "Service"
                 
@@ -746,8 +741,10 @@ class ProductDatabaseView(QWidget):
                     unit_price=float(self.services_table.item(row, 4).text() or 0) if self.services_table.item(row, 4) else 0.0,
                     price_l2=float(self.services_table.item(row, 5).text() or 0) if self.services_table.item(row, 5) else 0.0,
                     price_l3=float(self.services_table.item(row, 6).text() or 0) if self.services_table.item(row, 6) else 0.0,
-                    supplier=self.services_table.item(row, 7).text() if self.services_table.item(row, 7) else "",
-                    supplier_contact=self.services_table.item(row, 8).text() if self.services_table.item(row, 8) else "",
+                    discount=float(self.services_table.item(row, 7).text() or 0) if self.services_table.item(row, 7) else 0.0,
+                    supplier=self.services_table.item(row, 8).text() if self.services_table.item(row, 8) else "",
+                    supplier_contact=self.services_table.item(row, 9).text() if self.services_table.item(row, 9) else "",
+                    reference=self.services_table.item(row, 10).text() if self.services_table.item(row, 10) else "",
                     last_updated=d_val,
                     description=""
                 ))
