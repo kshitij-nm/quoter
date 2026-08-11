@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
     QMenu, QInputDialog, QSizePolicy
 )
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor  # Added to support duplicate highlighting
 
 from core.models import Product
 from core.catalog_manager import CatalogManager
@@ -53,6 +52,13 @@ def get_stylesheet(is_dark: bool) -> str:
         outline: none; 
     }}
     QTableView::item:focus {{ outline: none; border: none; }}
+    
+    /* FIX: Ensure clicked cells keep dark text on a visible background */
+    QTableView::item:selected {{ 
+        background-color: {theme['border']}; 
+        color: {theme['text']}; 
+    }}
+    
     QHeaderView::section {{ background-color: {theme['surface']}; color: {theme['text_muted']}; font-weight: bold; padding: 4px; border: none; border-bottom: 1px solid {theme['border']}; }}
     QLabel#h1 {{ font-size: 24px; font-weight: bold; }}
     QLabel#h2 {{ font-size: 18px; font-weight: bold; }}
@@ -423,50 +429,6 @@ class ProductDatabaseView(QWidget):
         table.customContextMenuRequested.connect(lambda pos, t=table: self.show_context_menu(pos, t))
         table.cellChanged.connect(change_handler)
 
-    def highlight_duplicates(self):
-        """Finds matches where the ENTIRE row's data is identical (ignoring the date)."""
-        self._is_loading = True
-        row_counts = {}
-        
-        # Pass 1: Build a signature for the entire row (Columns 1 through 10)
-        for table in [self.products_table, self.services_table]:
-            for row in range(table.rowCount()):
-                row_data = []
-                for col in range(1, 11): # Checks Name, Category, Specs, Prices, Supplier, Ref, etc.
-                    item = table.item(row, col)
-                    row_data.append(item.text().strip().lower() if item else "")
-                
-                # Only count rows that actually have a name
-                if row_data[0]: 
-                    signature = "|".join(row_data)
-                    row_counts[signature] = row_counts.get(signature, 0) + 1
-                    
-        # Soft Red Highlight color for duplicates
-        highlight_color = QColor(239, 68, 68, 50)  
-        
-        # Pass 2: Apply coloring to rows whose full signature appears more than once
-        for table in [self.products_table, self.services_table]:
-            for row in range(table.rowCount()):
-                row_data = []
-                for col in range(1, 11):
-                    item = table.item(row, col)
-                    row_data.append(item.text().strip().lower() if item else "")
-                
-                is_duplicate = False
-                if row_data[0]:
-                    signature = "|".join(row_data)
-                    if row_counts.get(signature, 0) > 1:
-                        is_duplicate = True
-                        
-                for col in range(table.columnCount()):
-                    item = table.item(row, col)
-                    if item:
-                        if is_duplicate:
-                            item.setBackground(highlight_color)
-                        else:
-                            item.setData(Qt.BackgroundRole, None)  # Clears the highlight
-        self._is_loading = False
-
     def clear_filters(self):
         self.search_box.blockSignals(True)
         self.category_cb.blockSignals(True)
@@ -727,7 +689,6 @@ class ProductDatabaseView(QWidget):
 
         self.products_table.setSortingEnabled(True)
         self.services_table.setSortingEnabled(True)
-        self.highlight_duplicates()
 
     def save_database(self):
         final_list = []
@@ -776,7 +737,6 @@ class ProductDatabaseView(QWidget):
                 
         self.catalog.save_catalog(final_list)
         self.all_products = final_list
-        self.highlight_duplicates()
 
 
 # ==========================================
