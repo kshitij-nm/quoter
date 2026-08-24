@@ -19,6 +19,10 @@ from core.catalog_manager import CatalogManager
 from core.quote_engine import QuoteEngine
 from core.excel_generator import ExcelGenerator
 
+if getattr(sys, 'frozen', False):
+    import pyi_splash
+    pyi_splash.update_text("Loading Application...")
+
 os.makedirs("data", exist_ok=True)
 os.makedirs("output", exist_ok=True)
 os.makedirs("drafts", exist_ok=True)
@@ -1233,5 +1237,7 @@ class MainWindow(QMainWindow):
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = MainWindow()
+    if getattr(sys, 'frozen', False):
+        pyi_splash.close()
     window.show()
     sys.exit(app.exec())
