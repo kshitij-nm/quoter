@@ -1,6 +1,7 @@
 import logging
 import pandas as pd
 from datetime import datetime
+import uuid
 from typing import List
 from .models import Product
 
@@ -58,7 +59,8 @@ class CatalogManager:
                         skillset=str(row.get('SkillSet', '')),
                         discount=parse_float(row.get('Discount (%)', 0.0)),  
                         reference=str(row.get('Reference', '')),             
-                        last_updated=date_str
+                        last_updated=date_str,
+                        uid=str(row.get('_UID', uuid.uuid4().hex))
                     ))
             return products
         except FileNotFoundError:
@@ -69,6 +71,8 @@ class CatalogManager:
         servs_data = []
         
         for p in products:
+            total_price = round(p.unit_price * (1 - (p.discount / 100)), 2)
+            
             if p.category.strip().lower() == 'service':
                 servs_data.append({
                     "Name": p.name,
@@ -78,10 +82,12 @@ class CatalogManager:
                     "Price L2": p.price_l2,
                     "Price L3": p.price_l3,
                     "Discount (%)": p.discount,
+                    "Total (₹)": total_price,
                     "Supplier": p.supplier,
                     "Contact Info": p.supplier_contact,
                     "Reference": p.reference,
-                    "Last Updated": p.last_updated
+                    "Last Updated": p.last_updated,
+                    "_UID": p.uid
                 })
             else:
                 prods_data.append({
@@ -92,10 +98,12 @@ class CatalogManager:
                     "Specification": p.specification,
                     "Price L1": p.unit_price,
                     "Discount (%)": p.discount,
+                    "Total (₹)": total_price,
                     "Supplier": p.supplier,
                     "Contact Info": p.supplier_contact,
                     "Reference": p.reference,
-                    "Last Updated": p.last_updated
+                    "Last Updated": p.last_updated,
+                    "_UID": p.uid
                 })
                 
         with pd.ExcelWriter(self.filepath, engine='openpyxl') as writer:

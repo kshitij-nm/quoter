@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import List
 from datetime import datetime
+import uuid
 
 @dataclass
 class Product:
@@ -19,6 +20,7 @@ class Product:
     discount: float = 0.0  
     reference: str = ""    
     last_updated: str = field(default_factory=lambda: datetime.now().strftime("%d-%m-%Y"))
+    uid: str = field(default_factory=lambda: uuid.uuid4().hex)
 
 @dataclass
 class QuoteItem:
