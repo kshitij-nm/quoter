@@ -1,27 +1,31 @@
 import sys
 import os
+import json
+import uuid
 from datetime import datetime
-from openpyxl import load_workbook
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QStackedWidget, QFrame, QLineEdit, QTableWidget,
     QTableWidgetItem, QHeaderView, QComboBox, QGridLayout, QAbstractItemView, 
-    QDialog, QSpinBox, QDoubleSpinBox, QMessageBox, QInputDialog, QFileDialog, QTabWidget
+    QDialog, QSpinBox, QDoubleSpinBox, QMessageBox, QTabWidget, QFileDialog,
+    QMenu, QInputDialog, QSizePolicy, QSplitter
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSettings
+from PySide6.QtGui import QColor
 
-from core.models import Product
-from core.models import ClientDetails
+from core.models import Product, QuoteItem
 from core.catalog_manager import CatalogManager
 from core.quote_engine import QuoteEngine
-from core.pdf_generator import PDFGenerator
 from core.excel_generator import ExcelGenerator
 
-# Ensure directories exist
+if getattr(sys, 'frozen', False):
+    import pyi_splash
+    pyi_splash.update_text("Loading Application...")
+
 os.makedirs("data", exist_ok=True)
-os.makedirs("drafts", exist_ok=True)
 os.makedirs("output", exist_ok=True)
+os.makedirs("drafts", exist_ok=True)
 
 LIGHT_THEME = {
     "bg": "#F8FAFC", "surface": "#FFFFFF", "primary": "#2563EB",
@@ -35,799 +39,203 @@ DARK_THEME = {
 
 def get_stylesheet(is_dark: bool) -> str:
     theme = DARK_THEME if is_dark else LIGHT_THEME
+    svg_check = "data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'%3E%3C/polyline%3E%3C/svg%3E"
+    
     return f"""
-    QMainWindow, QWidget {{ background-color: {theme['bg']}; color: {theme['text']}; font-family: 'Inter', sans-serif; }}
+    QMainWindow, QWidget, QDialog {{ background-color: {theme['bg']}; color: {theme['text']}; font-family: 'Inter', sans-serif; }}
     QFrame#surface {{ background-color: {theme['surface']}; border-radius: 8px; border: 1px solid {theme['border']}; }}
     QPushButton {{ background-color: {theme['surface']}; border: 1px solid {theme['border']}; border-radius: 4px; padding: 8px 16px; color: {theme['text']}; }}
     QPushButton:hover {{ background-color: {theme['border']}; }}
     QPushButton#primary_btn {{ background-color: {theme['primary']}; color: #FFFFFF; border: none; font-weight: bold; }}
     QPushButton#danger_btn {{ background-color: {theme.get('danger', '#EF4444')}; color: #FFFFFF; border: none; font-weight: bold; padding: 4px 8px; }}
+    
     QPushButton#sidebar_btn {{ text-align: left; padding-left: 20px; border: none; background: transparent; font-size: 14px; border-radius: 0px; }}
     QPushButton#sidebar_btn:checked {{ background-color: {theme['border']}; border-left: 4px solid {theme['primary']}; font-weight: bold; }}
+    
+    QPushButton#sidebar_btn_collapsed {{ text-align: center; padding: 8px 0px; border: none; background: transparent; font-size: 18px; border-radius: 0px; }}
+    QPushButton#sidebar_btn_collapsed:checked {{ background-color: {theme['border']}; border-left: 4px solid {theme['primary']}; font-weight: bold; }}
+    
+    QPushButton#collapse_btn {{
+        background-color: transparent;
+        border: 1px solid {theme['border']};
+        border-left: none;
+        border-top-right-radius: 4px;
+        border-bottom-right-radius: 4px;
+        border-top-left-radius: 0px;
+        border-bottom-left-radius: 0px;
+        color: {theme['text_muted']};
+        padding: 0px;
+        font-size: 10px;
+    }}
+    QPushButton#collapse_btn:hover {{ background-color: {theme['border']}; color: {theme['text']}; }}
+    
+    QSplitter::handle {{ background-color: {theme['border']}; width: 1px; }}
+    
     QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {{ background-color: {theme['surface']}; border: 1px solid {theme['border']}; border-radius: 4px; padding: 6px; color: {theme['text']}; }}
-    QTableWidget {{ background-color: {theme['surface']}; border: 1px solid {theme['border']}; border-radius: 8px; gridline-color: {theme['border']}; }}
+    
+    QTableWidget {{ background-color: {theme['surface']}; border: 1px solid {theme['border']}; border-radius: 8px; gridline-color: {theme['border']}; outline: none; }}
+    QTableView::item:focus {{ outline: none; border: none; }}
+    QTableView::item:selected {{ background-color: {theme['border']}; color: {theme['text']}; }}
+    
     QHeaderView::section {{ background-color: {theme['surface']}; color: {theme['text_muted']}; font-weight: bold; padding: 4px; border: none; border-bottom: 1px solid {theme['border']}; }}
     QLabel#h1 {{ font-size: 24px; font-weight: bold; }}
     QLabel#h2 {{ font-size: 18px; font-weight: bold; }}
-    QLabel#stat_val {{ font-size: 28px; font-weight: bold; color: {theme['primary']}; }}
-    QLabel#muted {{ color: {theme['text_muted']}; }}
+    QLabel#stat_val {{ font-size: 32px; font-weight: bold; color: {theme['primary']}; }}
+    QLabel#muted {{ color: {theme['text_muted']}; font-weight: bold; }}
+    QTabWidget::pane {{ border: 1px solid {theme['border']}; border-radius: 4px; }}
+    QTabBar::tab {{ background: {theme['bg']}; border: 1px solid {theme['border']}; padding: 8px 16px; border-top-left-radius: 4px; border-top-right-radius: 4px; }}
+    QTabBar::tab:selected {{ background: {theme['surface']}; font-weight: bold; border-bottom: 2px solid {theme['primary']}; }}
+    
+    QTableView::indicator {{ width: 18px; height: 18px; border: 2px solid #94A3B8; border-radius: 4px; background-color: {theme['surface']}; margin-left: 6px; }}
+    QTableView::indicator:checked {{ background-color: {theme['primary']}; border: 2px solid {theme['primary']}; image: url("{svg_check}"); }}
     """
 
 # ==========================================
-# VIEWS
+# CART DIALOG WITH DRAFTS
 # ==========================================
-class DashboardView(QWidget):
-    def __init__(self):
+class CartDialog(QDialog):
+    def __init__(self, engine, customer_name, parent_dashboard):
         super().__init__()
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(30, 30, 30, 30)
+        self.engine = engine
+        self.customer_name = customer_name
+        self.parent_dashboard = parent_dashboard
         
-        layout.addWidget(QLabel("Dashboard", objectName="h1"))
-        
-        stats_layout = QHBoxLayout()
-        self.lbl_total_prods = self._create_stat_card("TOTAL PRODUCTS", "0", "In Database")
-        self.lbl_pending = self._create_stat_card("PENDING DRAFTS", "0", "Requires attention")
-        self.lbl_revenue = self._create_stat_card("REVENUE", "₹0.00", "Finalized Quotes")
-        
-        stats_layout.addWidget(self.lbl_total_prods[0])
-        stats_layout.addWidget(self.lbl_pending[0])
-        stats_layout.addWidget(self.lbl_revenue[0])
-        layout.addLayout(stats_layout)
-        
-        layout.addWidget(QLabel("Recent Activity", objectName="h2"))
-        self.table = QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(["ID", "CLIENT", "TOTAL", "DATE", "STATUS"])
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        layout.addWidget(self.table)
-
-    def _create_stat_card(self, title, val, subtitle):
-        card = QFrame(objectName="surface")
-        l = QVBoxLayout(card)
-        l.addWidget(QLabel(title, objectName="muted"))
-        val_lbl = QLabel(val, objectName="stat_val")
-        l.addWidget(val_lbl)
-        l.addWidget(QLabel(subtitle, objectName="muted"))
-        return card, val_lbl, None
-
-    def refresh_dashboard(self, catalog_mgr):
-        # Update Products count badge safely
-        self.lbl_total_prods[1].setText(f"{len(catalog_mgr.load_catalog()):,}")
-        
-        history = []
-        total_revenue = 0.0
-        
-        # Scan Drafts folder cleanly
-        if os.path.exists("drafts"):
-            drafts = [f for f in os.listdir("drafts") if f.endswith(".xlsx")]
-            self.lbl_pending[1].setText(str(len(drafts)))
-            for d in drafts:
-                info = self.extract_excel_meta(os.path.join("drafts", d), "Draft")
-                if info: 
-                    history.append(info)
-        else:
-            self.lbl_pending[1].setText("0")
-            
-        # Scan Output (Finalized) folder cleanly
-        if os.path.exists("output"):
-            outputs = [f for f in os.listdir("output") if f.endswith(".xlsx")]
-            for o in outputs:
-                info = self.extract_excel_meta(os.path.join("output", o), "Completed")
-                if info: 
-                    history.append(info)
-                    total_revenue += info['total']
-                
-        self.lbl_revenue[1].setText(f"₹{total_revenue:,.2f}")
-        
-        # Populate GUI Table with zero-edit flags locked
-        history.sort(key=lambda x: x['timestamp'], reverse=True)
-        self.table.setRowCount(len(history))
-        for row, item in enumerate(history):
-            self.table.setItem(row, 0, QTableWidgetItem(item['id']))
-            self.table.setItem(row, 1, QTableWidgetItem(item['client']))
-            self.table.setItem(row, 2, QTableWidgetItem(f"₹{item['total']:,.2f}"))
-            self.table.setItem(row, 3, QTableWidgetItem(item['date']))
-            self.table.setItem(row, 4, QTableWidgetItem(item['status']))
-
-    def extract_excel_meta(self, path, status):
-        """Resiliently scans generated files to read quote info back to the dashboard table."""
-        try:
-            wb = load_workbook(path, data_only=True)
-            ws = wb.active
-            
-            client = "Unknown"
-            qid = os.path.splitext(os.path.basename(path))[0] # Fallback to filename if cell parse drops
-            total = 0.0
-            
-            # Smart text search through the sheet matrix to parse meta details
-            for row in ws.iter_rows(values_only=True):
-                for val in row:
-                    if not val: 
-                        continue
-                    val_str = str(val).strip()
-                    if "Client:" in val_str:
-                        client = val_str.replace("Client:", "").strip()
-                    elif "Quote #:" in val_str:
-                        qid = val_str.replace("Quote #:", "").strip()
-                    elif "Total:" in val_str or "Total price" in val_str:
-                        # Grab the numeric value if it sits nearby in the row array
-                        for potential_val in row:
-                            if isinstance(potential_val, (int, float)):
-                                total = float(potential_val)
-            
-            # Fallback evaluation: if the file has items but Excel hasn't calculated formulas yet
-            if total == 0.0:
-                # Scan columns to build an estimation if cells are cached as None
-                for r in range(1, ws.max_row + 1):
-                    val_e = ws.cell(row=r, column=5).value  # Column E calculation check
-                    if isinstance(val_e, (int, float)):
-                        total += float(val_e)
-
-            date_str = datetime.fromtimestamp(os.path.getmtime(path)).strftime('%b %d, %Y')
-            return {
-                "id": qid, 
-                "client": client, 
-                "total": total, 
-                "date": date_str, 
-                "status": status, 
-                "timestamp": os.path.getmtime(path)
-            }
-        except Exception as e:
-            print(f"Skipping unreadable activity file {path}: {e}")
-            return None
-
-
-class ProductDatabaseView(QWidget):
-    def __init__(self, catalog_mgr, main_window):
-        super().__init__()
-        self.catalog = catalog_mgr
-        self.main_window = main_window
-        self.all_products = []
-        self.selection_mode = False
+        self.setWindowTitle("Shopping Cart")
+        self.resize(1100, 700)
         
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(30, 30, 30, 30)
         
-        # --- Header ---
         header = QHBoxLayout()
-        self.title_label = QLabel("Product Database", objectName="h1")
-        header.addWidget(self.title_label)
-        header.addStretch()
+        header.addWidget(QLabel("Cart for:", objectName="h1"))
         
-        self.btn_edit = QPushButton("✏️ Edit Database")
-        self.btn_edit.clicked.connect(self.toggle_edit_mode)
+        self.draft_dropdown = QComboBox()
+        self.draft_dropdown.setMinimumWidth(200)
+        self.refresh_drafts_dropdown()
         
-        self.btn_save = QPushButton("💾 Save Changes")
-        self.btn_save.setObjectName("primary_btn")
-        self.btn_save.hide()
-        self.btn_save.clicked.connect(self.save_database)
-        
-        self.btn_add_row = QPushButton("+ Add Empty Row")
-        self.btn_add_row.hide()
-        self.btn_add_row.clicked.connect(self.add_empty_row)
-        
-        header.addWidget(self.btn_edit)
-        header.addWidget(self.btn_add_row)
-        header.addWidget(self.btn_save)
-        layout.addLayout(header)
-        
-        # --- Filters ---
-        filter_layout = QHBoxLayout()
-        self.search_box = QLineEdit()
-        self.search_box.setPlaceholderText("Search by Name, Category, or Supplier...")
-        self.search_box.textChanged.connect(self.apply_filters)
-        
-        self.category_cb = QComboBox()
-        self.category_cb.currentTextChanged.connect(self.apply_filters)
-        self.supplier_cb = QComboBox()
-        self.supplier_cb.currentTextChanged.connect(self.apply_filters)
-        
-        filter_layout.addWidget(QLabel("🔍 Filter:"))
-        filter_layout.addWidget(self.search_box)
-        filter_layout.addWidget(QLabel("Category:"))
-        filter_layout.addWidget(self.category_cb)
-        filter_layout.addWidget(QLabel("Supplier:"))
-        filter_layout.addWidget(self.supplier_cb)
-        filter_layout.addStretch()
-        layout.addLayout(filter_layout)
-        
-        # --- Tabs ---
-        self.tabs = QTabWidget()
-        
-        # TAB 1: PRODUCTS (Non-Service)
-        self.tab_products = QWidget()
-        prod_layout = QVBoxLayout(self.tab_products)
-        prod_layout.setContentsMargins(0, 10, 0, 0)
-        self.products_table = QTableWidget(0, 10)
-        self.products_table.setHorizontalHeaderLabels([
-            "Select", "NAME", "CATEGORY", "MAKE", "MODEL", "SPECIFICATION", 
-            "PRICE (₹)", "SUPPLIER", "CONTACT INFO", "LAST UPDATED"
-        ])
-        self.setup_table(self.products_table)
-        prod_layout.addWidget(self.products_table)
-        self.tabs.addTab(self.tab_products, "🛒 Products")
-
-        # TAB 2: SERVICES
-        self.tab_services = QWidget()
-        serv_layout = QVBoxLayout(self.tab_services)
-        serv_layout.setContentsMargins(0, 10, 0, 0)
-        self.services_table = QTableWidget(0, 10)
-        self.services_table.setHorizontalHeaderLabels([
-            "Select", "NAME", "CATEGORY", "SKILLSET", "L1 / BASE (₹)", 
-            "L2 (₹)", "L3 (₹)", "SUPPLIER", "CONTACT INFO", "LAST UPDATED"
-        ])
-        self.setup_table(self.services_table)
-        serv_layout.addWidget(self.services_table)
-        self.tabs.addTab(self.tab_services, "🛠 Services")
-
-        layout.addWidget(self.tabs)
-        
-        # --- Selection Footer ---
-        self.footer = QHBoxLayout()
-        self.footer.addStretch()
-        self.btn_cancel = QPushButton("Cancel")
-        self.btn_cancel.clicked.connect(self.cancel_selection)
-        self.btn_proceed = QPushButton("Proceed with Selection →")
-        self.btn_proceed.setObjectName("primary_btn")
-        self.btn_proceed.clicked.connect(self.process_selection)
-        
-        self.footer.addWidget(self.btn_cancel)
-        self.footer.addWidget(self.btn_proceed)
-        self.footer_widget = QWidget()
-        self.footer_widget.setLayout(self.footer)
-        self.footer_widget.hide()
-        layout.addWidget(self.footer_widget)
-
-    def setup_table(self, table):
-        """Helper to apply standard styling to both tables."""
-        table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
-        table.horizontalHeader().setStretchLastSection(True)
-        table.horizontalHeader().resizeSection(0, 50)  
-        table.horizontalHeader().resizeSection(1, 200) 
-        table.setColumnHidden(0, True)
-        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        table.setSortingEnabled(True)
-        # Pass the specific table into the cell click handler
-        table.cellClicked.connect(lambda row, col, t=table: self.on_cell_clicked(row, col, t))
-
-    def load_data(self):
-        self.all_products = self.catalog.load_catalog()
-        categories = ["All Categories"] + sorted(list(set(p.category for p in self.all_products if p.category)))
-        suppliers = ["All Suppliers"] + sorted(list(set(p.supplier for p in self.all_products if p.supplier)))
-        self.category_cb.blockSignals(True)
-        self.supplier_cb.blockSignals(True)
-        self.category_cb.clear()
-        self.supplier_cb.clear()
-        self.category_cb.addItems(categories)
-        self.supplier_cb.addItems(suppliers)
-        self.category_cb.blockSignals(False)
-        self.supplier_cb.blockSignals(False)
-        self.apply_filters()
-
-    def apply_filters(self):
-        search = self.search_box.text().lower()
-        cat = self.category_cb.currentText()
-        sup = self.supplier_cb.currentText()
-        
-        prods = []
-        servs = []
-        
-        for p in self.all_products:
-            match_search = (search in p.name.lower() or search in p.category.lower() or search in p.supplier.lower())
-            match_cat = (cat == "All Categories" or p.category == cat)
-            match_sup = (sup == "All Suppliers" or p.supplier == sup)
-            
-            if match_search and match_cat and match_sup:
-                if p.category.strip().lower() == 'service':
-                    servs.append(p)
-                else:
-                    prods.append(p)
-                    
-        self.populate_tables(prods, servs)
-
-    def populate_tables(self, products, services):
-        self.products_table.setSortingEnabled(False)
-        self.services_table.setSortingEnabled(False)
-        
-        # Populate Products Tab
-        self.products_table.setRowCount(len(products))
-        for row, p in enumerate(products):
-            chk = QTableWidgetItem()
-            chk.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
-            chk.setCheckState(Qt.Unchecked)
-            self.products_table.setItem(row, 0, chk)
-            self.products_table.setItem(row, 1, QTableWidgetItem(p.name))
-            self.products_table.setItem(row, 2, QTableWidgetItem(p.category))
-            self.products_table.setItem(row, 3, QTableWidgetItem(p.make))
-            self.products_table.setItem(row, 4, QTableWidgetItem(p.model))
-            self.products_table.setItem(row, 5, QTableWidgetItem(p.specification))
-            
-            price_item = QTableWidgetItem()
-            price_item.setData(Qt.DisplayRole, p.unit_price)
-            self.products_table.setItem(row, 6, price_item)
-            
-            self.products_table.setItem(row, 7, QTableWidgetItem(p.supplier))
-            self.products_table.setItem(row, 8, QTableWidgetItem(p.supplier_contact))
-            self.products_table.setItem(row, 9, QTableWidgetItem(p.last_updated))
-
-        # Populate Services Tab
-        self.services_table.setRowCount(len(services))
-        for row, s in enumerate(services):
-            chk = QTableWidgetItem()
-            chk.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
-            chk.setCheckState(Qt.Unchecked)
-            self.services_table.setItem(row, 0, chk)
-            self.services_table.setItem(row, 1, QTableWidgetItem(s.name))
-            self.services_table.setItem(row, 2, QTableWidgetItem(s.category))
-            self.services_table.setItem(row, 3, QTableWidgetItem(s.skillset))
-            
-            l1_item = QTableWidgetItem()
-            l1_item.setData(Qt.DisplayRole, s.unit_price)
-            self.services_table.setItem(row, 4, l1_item)
-            
-            l2_item = QTableWidgetItem()
-            l2_item.setData(Qt.DisplayRole, s.price_l2)
-            self.services_table.setItem(row, 5, l2_item)
-            
-            l3_item = QTableWidgetItem()
-            l3_item.setData(Qt.DisplayRole, s.price_l3)
-            self.services_table.setItem(row, 6, l3_item)
-            
-            self.services_table.setItem(row, 7, QTableWidgetItem(s.supplier))
-            self.services_table.setItem(row, 8, QTableWidgetItem(s.supplier_contact))
-            self.services_table.setItem(row, 9, QTableWidgetItem(s.last_updated))
-
-        self.products_table.setSortingEnabled(True)
-        self.services_table.setSortingEnabled(True)
-
-    def on_cell_clicked(self, row, col, table):
-        if self.selection_mode and col != 0:
-            chk = table.item(row, 0)
-            if chk:
-                new_state = Qt.Checked if chk.checkState() == Qt.Unchecked else Qt.Unchecked
-                chk.setCheckState(new_state)
-
-    def enable_selection_mode(self):
-        self.selection_mode = True
-        self.title_label.setText("Select Products for Quote")
-        self.btn_edit.hide()
-        self.products_table.setColumnHidden(0, False)
-        self.services_table.setColumnHidden(0, False)
-        self.footer_widget.show()
-        self.load_data()
-
-    def cancel_selection(self):
-        self.disable_selection_mode()
-        self.main_window.switch_view(2) 
-
-    def disable_selection_mode(self):
-        self.selection_mode = False
-        self.title_label.setText("Product Database")
-        self.btn_edit.show()
-        self.products_table.setColumnHidden(0, True)
-        self.services_table.setColumnHidden(0, True)
-        self.footer_widget.hide()
-        
-        for table in [self.products_table, self.services_table]:
-            for row in range(table.rowCount()):
-                if table.item(row, 0):
-                    table.item(row, 0).setCheckState(Qt.Unchecked)
-
-    def process_selection(self):
-        selected = []
-        # Grab from Products Table
-        for row in range(self.products_table.rowCount()):
-            if self.products_table.item(row, 0) and self.products_table.item(row, 0).checkState() == Qt.Checked:
-                selected.append(Product(
-                    name=self.products_table.item(row, 1).text() if self.products_table.item(row, 1) else "",
-                    category=self.products_table.item(row, 2).text() if self.products_table.item(row, 2) else "",
-                    make=self.products_table.item(row, 3).text() if self.products_table.item(row, 3) else "",
-                    model=self.products_table.item(row, 4).text() if self.products_table.item(row, 4) else "",
-                    specification=self.products_table.item(row, 5).text() if self.products_table.item(row, 5) else "",
-                    description="",
-                    unit_price=float(self.products_table.item(row, 6).text() or 0) if self.products_table.item(row, 6) else 0.0,
-                    supplier=self.products_table.item(row, 7).text() if self.products_table.item(row, 7) else "",
-                    supplier_contact=self.products_table.item(row, 8).text() if self.products_table.item(row, 8) else "",
-                    last_updated=self.products_table.item(row, 9).text() if self.products_table.item(row, 9) else datetime.now().strftime("%Y-%m-%d")
-                ))
-                
-        # Grab from Services Table
-        for row in range(self.services_table.rowCount()):
-            if self.services_table.item(row, 0) and self.services_table.item(row, 0).checkState() == Qt.Checked:
-                selected.append(Product(
-                    name=self.services_table.item(row, 1).text() if self.services_table.item(row, 1) else "",
-                    category=self.services_table.item(row, 2).text() if self.services_table.item(row, 2) else "",
-                    skillset=self.services_table.item(row, 3).text() if self.services_table.item(row, 3) else "",
-                    description="",
-                    unit_price=float(self.services_table.item(row, 4).text() or 0) if self.services_table.item(row, 4) else 0.0,
-                    price_l2=float(self.services_table.item(row, 5).text() or 0) if self.services_table.item(row, 5) else 0.0,
-                    price_l3=float(self.services_table.item(row, 6).text() or 0) if self.services_table.item(row, 6) else 0.0,
-                    supplier=self.services_table.item(row, 7).text() if self.services_table.item(row, 7) else "",
-                    supplier_contact=self.services_table.item(row, 8).text() if self.services_table.item(row, 8) else "",
-                    last_updated=self.services_table.item(row, 9).text() if self.services_table.item(row, 9) else datetime.now().strftime("%Y-%m-%d")
-                ))
-                
-        self.disable_selection_mode()
-        self.main_window.finish_product_selection(selected)
-
-    def toggle_edit_mode(self):
-        self.products_table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
-        self.services_table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
-        self.btn_edit.hide()
-        self.btn_save.show()
-        self.btn_add_row.show()
-
-    def add_empty_row(self):
-        """Adds a row to whichever tab is currently active."""
-        if self.tabs.currentIndex() == 0:
-            target_table = self.products_table
+        idx = self.draft_dropdown.findText(self.customer_name)
+        if idx >= 0:
+            self.draft_dropdown.setCurrentIndex(idx)
         else:
-            target_table = self.services_table
+            self.draft_dropdown.addItem(self.customer_name)
+            self.draft_dropdown.setCurrentText(self.customer_name)
             
-        target_table.setSortingEnabled(False)
-        row = target_table.rowCount()
-        target_table.insertRow(row)
-        for c in range(1, 10):
-            target_table.setItem(row, c, QTableWidgetItem(""))
-            
-        target_table.setItem(row, 9, QTableWidgetItem(datetime.now().strftime("%Y-%m-%d")))
-        target_table.setSortingEnabled(True)
-
-    def save_database(self):
-        final_list = []
-        today_str = datetime.now().strftime("%Y-%m-%d")
-        
-        # Read Products
-        for row in range(self.products_table.rowCount()):
-            pname = self.products_table.item(row, 1)
-            if pname and pname.text().strip():
-                date_val = self.products_table.item(row, 9).text() if self.products_table.item(row, 9) and self.products_table.item(row, 9).text().strip() else today_str
-                final_list.append(Product(
-                    name=pname.text(),
-                    category=self.products_table.item(row, 2).text() if self.products_table.item(row, 2) else "",
-                    make=self.products_table.item(row, 3).text() if self.products_table.item(row, 3) else "",
-                    model=self.products_table.item(row, 4).text() if self.products_table.item(row, 4) else "",
-                    specification=self.products_table.item(row, 5).text() if self.products_table.item(row, 5) else "",
-                    unit_price=float(self.products_table.item(row, 6).text() or 0) if self.products_table.item(row, 6) else 0.0,
-                    supplier=self.products_table.item(row, 7).text() if self.products_table.item(row, 7) else "",
-                    supplier_contact=self.products_table.item(row, 8).text() if self.products_table.item(row, 8) else "",
-                    last_updated=date_val,
-                    description=""
-                ))
-                
-        # Read Services
-        for row in range(self.services_table.rowCount()):
-            sname = self.services_table.item(row, 1)
-            if sname and sname.text().strip():
-                date_val = self.services_table.item(row, 9).text() if self.services_table.item(row, 9) and self.services_table.item(row, 9).text().strip() else today_str
-                
-                cat_val = self.services_table.item(row, 2).text() if self.services_table.item(row, 2) else ""
-                if not cat_val: cat_val = "Service" # Ensure it gets caught as a service
-                
-                final_list.append(Product(
-                    name=sname.text(),
-                    category=cat_val,
-                    skillset=self.services_table.item(row, 3).text() if self.services_table.item(row, 3) else "",
-                    unit_price=float(self.services_table.item(row, 4).text() or 0) if self.services_table.item(row, 4) else 0.0,
-                    price_l2=float(self.services_table.item(row, 5).text() or 0) if self.services_table.item(row, 5) else 0.0,
-                    price_l3=float(self.services_table.item(row, 6).text() or 0) if self.services_table.item(row, 6) else 0.0,
-                    supplier=self.services_table.item(row, 7).text() if self.services_table.item(row, 7) else "",
-                    supplier_contact=self.services_table.item(row, 8).text() if self.services_table.item(row, 8) else "",
-                    last_updated=date_val,
-                    description=""
-                ))
-                
-        self.catalog.save_catalog(final_list)
-        self.products_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.services_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.btn_save.hide()
-        self.btn_add_row.hide()
-        self.btn_edit.show()
-        QMessageBox.information(self, "Success", "Database Updated!")
-        self.load_data()
-
-
-class NewQuotationView(QWidget):
-    def __init__(self, quote_engine, main_window):
-        super().__init__()
-        self.engine = quote_engine
-        self.main_window = main_window
-        
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(30, 30, 30, 30)
-        
-        # --- Top Client Bar ---
-        top_bar = QHBoxLayout()
-        self.client_name = QLineEdit()
-        self.client_name.setPlaceholderText("Client Name")
-        self.client_name.textChanged.connect(self.update_client_info)
-        self.quote_num = QLineEdit()
-        self.quote_num.setReadOnly(True)
-        top_bar.addWidget(QLabel("CLIENT:"))
-        top_bar.addWidget(self.client_name)
-        top_bar.addWidget(QLabel("ID:"))
-        top_bar.addWidget(self.quote_num)
+        header.addWidget(self.draft_dropdown)
         
         btn_import = QPushButton("📂 Import Draft")
         btn_import.clicked.connect(self.import_draft)
-        btn_delete_draft = QPushButton("🗑 Delete Draft")
-        btn_delete_draft.clicked.connect(self.delete_draft_file)
-        top_bar.addWidget(btn_import)
-        top_bar.addWidget(btn_delete_draft)
-        layout.addLayout(top_bar)
+        header.addWidget(btn_import)
         
-        # --- Action Bar ---
-        act_bar = QHBoxLayout()
-        act_bar.addStretch()
+        header.addStretch()
         
-        # New Preview Toggle Button
-        self.btn_preview = QPushButton("👁 Show Preview")
-        self.btn_preview.clicked.connect(self.toggle_preview)
+        btn_clear = QPushButton("🗑 Empty Cart")
+        btn_clear.setObjectName("danger_btn")
+        btn_clear.clicked.connect(self.empty_cart)
+        header.addWidget(btn_clear)
+        layout.addLayout(header)
         
-        btn_draft = QPushButton("💾 Save Draft")
-        btn_draft.clicked.connect(self.save_draft)
-        btn_excel = QPushButton("📊 Export Final Excel")
-        btn_excel.setObjectName("primary_btn")
-        btn_excel.clicked.connect(self.export_final)
-        
-        act_bar.addWidget(self.btn_preview)
-        act_bar.addWidget(btn_draft)
-        act_bar.addWidget(btn_excel)
-        layout.addLayout(act_bar)
-        
-        self.split_layout = QHBoxLayout()
-        
-        # --- Left Pane (Data Entry) ---
-        self.left_pane = QFrame(objectName="surface")
-        left_l = QVBoxLayout(self.left_pane)
-        header_l = QHBoxLayout()
-        header_l.addWidget(QLabel("Quotation Items", objectName="h2"))
-        header_l.addStretch()
-        btn_clear_all = QPushButton("🗑 Clear All")
-        btn_clear_all.setObjectName("danger_btn") 
-        btn_clear_all.clicked.connect(self.clear_all_items)
-        btn_add_line = QPushButton("+ Add Products/Services")
-        btn_add_line.clicked.connect(self.add_line_item)
-        header_l.addWidget(btn_clear_all)
-        header_l.addWidget(btn_add_line)
-        left_l.addLayout(header_l)
-        
-        # Products Table
-        left_l.addWidget(QLabel("Products", objectName="h2"))
-        self.products_table = QTableWidget(0, 9)
-        self.products_table.setHorizontalHeaderLabels(["#", "DESCRIPTION", "SPECIFICATION", "MAKE", "MODEL", "QTY", "UNIT PRICE", "TOTAL", "ACT"])
+        layout.addWidget(QLabel("Products", objectName="h2"))
+        self.products_table = QTableWidget(0, 7)
+        self.products_table.setHorizontalHeaderLabels(["#", "DESCRIPTION", "QTY", "PRICE (L1)", "DISC %", "TOTAL", "ACT"])
         self.products_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.products_table.horizontalHeader().resizeSection(0, 40)
-        self.products_table.horizontalHeader().resizeSection(5, 60) # Qty
-        self.products_table.horizontalHeader().resizeSection(8, 50) # Act
-        left_l.addWidget(self.products_table)
+        self.products_table.horizontalHeader().resizeSection(2, 60)
+        self.products_table.horizontalHeader().resizeSection(4, 60)
+        self.products_table.horizontalHeader().resizeSection(6, 50)
+        self.products_table.verticalHeader().setVisible(False)
+        layout.addWidget(self.products_table)
         
-        # Services Table
-        left_l.addWidget(QLabel("Services", objectName="h2"))
-        self.services_table = QTableWidget(0, 7)
-        self.services_table.setHorizontalHeaderLabels(["#", "DESCRIPTION", "SKILLSET", "LVL", "NO. OF DAYS", "PRICE", "ACT"])
+        layout.addWidget(QLabel("Services", objectName="h2"))
+        self.services_table = QTableWidget(0, 8)
+        self.services_table.setHorizontalHeaderLabels(["#", "DESCRIPTION", "SERVICE LVL", "QTY", "PRICE", "DISC %", "TOTAL", "ACT"])
         self.services_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.services_table.horizontalHeader().resizeSection(0, 40)
-        self.services_table.horizontalHeader().resizeSection(4, 80) # No of days
-        self.services_table.horizontalHeader().resizeSection(6, 50) # Act
-        left_l.addWidget(self.services_table)
+        self.services_table.horizontalHeader().resizeSection(3, 60)
+        self.services_table.horizontalHeader().resizeSection(5, 60)
+        self.services_table.horizontalHeader().resizeSection(7, 50) 
+        self.services_table.verticalHeader().setVisible(False)
+        layout.addWidget(self.services_table)
         
-        # Totals
+        bottom_bar = QHBoxLayout()
         summary_l = QGridLayout()
-        summary_l.addWidget(QLabel("Subtotal"), 0, 0)
-        self.lbl_subtotal = QLabel("₹0.00", alignment=Qt.AlignRight)
-        summary_l.addWidget(self.lbl_subtotal, 0, 1)
-        summary_l.addWidget(QLabel("Profit And Overhead %:"), 1, 0)
-        self.tax_spinner = QDoubleSpinBox()
-        self.tax_spinner.setRange(0, 100)
-        self.tax_spinner.setValue(15.0)
-        self.tax_spinner.valueChanged.connect(self.update_tax)
-        summary_l.addWidget(self.tax_spinner, 1, 1)
-        summary_l.addWidget(QLabel("Total Value", objectName="h2"), 2, 0)
+        
+        summary_l.addWidget(QLabel("Total Value:", objectName="h2"), 0, 0)
         self.lbl_total = QLabel("₹0.00", objectName="stat_val", alignment=Qt.AlignRight)
-        summary_l.addWidget(self.lbl_total, 2, 1)
-        left_l.addLayout(summary_l)
+        summary_l.addWidget(self.lbl_total, 0, 1)
         
-        self.split_layout.addWidget(self.left_pane, 6)
+        bottom_bar.addLayout(summary_l)
+        bottom_bar.addStretch()
         
-        # --- Right Pane (Excel Preview - Hidden by default) ---
-        self.right_pane = QFrame(objectName="surface")
-        right_l = QVBoxLayout(self.right_pane)
-        right_l.addWidget(QLabel("Excel Template Preview", objectName="h2"))
+        btn_export = QPushButton("📊 Export to Excel")
+        btn_export.setObjectName("primary_btn")
+        btn_export.setMinimumHeight(50)
+        btn_export.setMinimumWidth(200)
+        btn_export.clicked.connect(self.export_final)
+        bottom_bar.addWidget(btn_export)
+        layout.addLayout(bottom_bar)
+        self.refresh_ui()
+
+    def refresh_drafts_dropdown(self):
+        self.draft_dropdown.clear()
+        drafts = [f.replace(".json", "") for f in os.listdir("drafts") if f.endswith(".json")]
+        self.draft_dropdown.addItems(drafts)
+
+    def import_draft(self):
+        selected = self.draft_dropdown.currentText()
+        if not selected: return
         
-        self.excel_preview = QTableWidget(12, 8) # Expanded to 8 columns to match new format
-        self.excel_preview.setHorizontalHeaderLabels(["A", "B", "C", "D", "E", "F", "G", "H"])
-        self.excel_preview.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
-        self.excel_preview.horizontalHeader().setStretchLastSection(True)
-        self.excel_preview.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        right_l.addWidget(self.excel_preview)
+        filepath = f"drafts/{selected}.json"
+        if not os.path.exists(filepath): return
         
-        self.right_pane.hide() # Starts hidden!
-        self.split_layout.addWidget(self.right_pane, 4)
+        self.parent_dashboard.customer_input.setText(selected)
+        self.customer_name = selected
         
-        layout.addLayout(self.split_layout)
-
-    def toggle_preview(self):
-        """Toggles the visibility of the preview pane and generates the data if opening."""
-        is_hidden = self.right_pane.isHidden()
-        self.right_pane.setVisible(is_hidden)
-        self.btn_preview.setText("👁 Hide Preview" if is_hidden else "👁 Show Preview")
-        
-        # FIX: Force the preview to render immediately when the user unhides it!
-        if is_hidden:
-            self.update_excel_preview()
-
-    def update_excel_preview(self):
-        """Dynamically reads format.xlsx, injects data in memory, and renders it to the UI."""
-        import os
-        import openpyxl
-        import string
-
-        if not self.engine.current_quote: 
-            return
-            
-        template_path = "data/format.xlsx"
-        if not os.path.exists(template_path):
-            self.excel_preview.clear()
-            self.excel_preview.setRowCount(1)
-            self.excel_preview.setColumnCount(1)
-            self.excel_preview.setItem(0, 0, QTableWidgetItem("Template format.xlsx not found!"))
-            return
-
-        quote = self.engine.current_quote
-        
-        # 1. Load the template into memory
-        wb = openpyxl.load_workbook(template_path)
-        ws = wb.active
-
-        # 2. Define replacements
-        replacements = {
-            "[CLIENT_NAME]": quote.client.name,
-            "[QUOTE_ID]": quote.quote_id,
-            "[DATE]": quote.date.strftime('%b %d, %Y'),
-            "[SUBTOTAL]": f"₹{quote.subtotal:,.2f}",
-            "[TAX_RATE]": f"{(quote.tax_rate*100):.0f}%",
-            "[TAX_AMOUNT]": f"₹{quote.tax_amount:,.2f}",
-            "[TOTAL]": f"₹{quote.total:,.2f}"
-        }
-
-        p_start_row, p_start_col = None, None
-        s_start_row, s_start_col = None, None
-
-        # 3. Apply static tags and find anchor points
-        for row in ws.iter_rows():
-            for cell in row:
-                if type(cell).__name__ == 'MergedCell': 
-                    continue
-                if isinstance(cell.value, str):
-                    for tag, val in replacements.items():
-                        if tag in cell.value:
-                            cell.value = str(cell.value).replace(tag, str(val))
-                    if "[START_PRODUCTS]" in str(cell.value):
-                        p_start_row, p_start_col = cell.row, cell.column
-                        cell.value = ""
-                    elif "[START_SERVICES]" in str(cell.value):
-                        s_start_row, s_start_col = cell.row, cell.column
-                        cell.value = ""
-
-        # 4. Helper to inject items while jumping over merged cells
-        def get_next_col(r, c):
-            while type(ws.cell(row=r, column=c)).__name__ == 'MergedCell':
-                c += 1
-            return c
-
-        def write_items(start_r, start_c, items, is_service):
-            for i, item in enumerate(items):
-                r = start_r + i
-                if is_service:
-                    vals = [i+1, item.product.name, item.product.skillset, item.quantity, f"₹{item.subtotal:,.2f}"]
-                else:
-                    vals = [i+1, item.product.name, item.product.specification, item.product.make, item.product.model, item.quantity, f"₹{item.active_price:,.2f}", f"₹{item.subtotal:,.2f}"]
-                
-                c = start_c
-                for val in vals:
-                    c = get_next_col(r, c)
-                    ws.cell(row=r, column=c, value=val)
-                    c += 1
-
-        products = [i for i in quote.items if i.product.category.strip().lower() != 'service']
-        services = [i for i in quote.items if i.product.category.strip().lower() == 'service']
-
-        if p_start_row: write_items(p_start_row, p_start_col, products, False)
-        if s_start_row: write_items(s_start_row, s_start_col, services, True)
-
-        # 5. Render the in-memory Excel sheet to the UI Table
-        self.excel_preview.clear()
-        self.excel_preview.setRowCount(ws.max_row)
-        self.excel_preview.setColumnCount(ws.max_column)
-
-        # Generate A, B, C column headers
-        cols = list(string.ascii_uppercase) + [f"A{c}" for c in string.ascii_uppercase]
-        self.excel_preview.setHorizontalHeaderLabels(cols[:ws.max_column])
-
-        # Copy data
-        for row in ws.iter_rows():
-            for cell in row:
-                if type(cell).__name__ == 'MergedCell': 
-                    continue
-                if cell.value is not None:
-                    # PySide6 uses 0-based indexing, openpyxl uses 1-based
-                    self.excel_preview.setItem(cell.row - 1, cell.column - 1, QTableWidgetItem(str(cell.value)))
-
-        # 6. Replicate Merged Cells in the UI!
-        for merged_range in ws.merged_cells.ranges:
-            min_col, min_row, max_col, max_row = merged_range.bounds
-            self.excel_preview.setSpan(min_row - 1, min_col - 1, max_row - min_row + 1, max_col - min_col + 1)
-
-    def start_session(self):
-        if not self.engine.current_quote:
-            client = ClientDetails(self.client_name.text(), "", "")
-            qid = self.engine.start_new_quote(client, self.tax_spinner.value() / 100.0)
-            self.quote_num.setText(qid)
-
-    def add_line_item(self):
-        self.start_session()
-        self.main_window.switch_to_db_selection_mode()
-
-    def update_client_info(self):
-        if self.engine.current_quote:
-            self.engine.current_quote.client.name = self.client_name.text()
-            self.update_excel_preview()
-
-    def update_tax(self):
-        if self.engine.current_quote:
-            self.engine.current_quote.tax_rate = self.tax_spinner.value() / 100.0
-            self.refresh_ui()
+        self.refresh_ui()
+        self.parent_dashboard.update_cart_btn()
+        self.parent_dashboard.sync_checkboxes_with_cart()
+        QMessageBox.information(self, "Imported", f"Draft '{selected}' loaded successfully.")
 
     def update_qty(self, absolute_index, new_qty):
-        if self.engine.current_quote:
-            self.engine.current_quote.items[absolute_index].quantity = new_qty
-            self.refresh_ui()
+        cart = self.engine.get_cart(self.customer_name)
+        cart.items[absolute_index].quantity = new_qty
+        self.refresh_ui()
+        self.parent_dashboard.silent_save_draft(self.customer_name)
+        
+    def update_discount(self, absolute_index, new_disc):
+        cart = self.engine.get_cart(self.customer_name)
+        cart.items[absolute_index].discount_percent = new_disc
+        self.refresh_ui()
+        self.parent_dashboard.silent_save_draft(self.customer_name)
 
     def update_service_level(self, absolute_index, combo_box_text):
-        if self.engine.current_quote:
-            lvl_map = {"Level 1": 1, "Level 2": 2, "Level 3": 3}
-            self.engine.current_quote.items[absolute_index].service_level = lvl_map.get(combo_box_text, 1)
-            self.refresh_ui()
+        cart = self.engine.get_cart(self.customer_name)
+        lvl_map = {"Level 1": 1, "Level 2": 2, "Level 3": 3}
+        cart.items[absolute_index].service_level = lvl_map.get(combo_box_text, 1)
+        self.refresh_ui()
+        self.parent_dashboard.silent_save_draft(self.customer_name)
 
     def delete_item(self, absolute_index):
-        if self.engine.current_quote:
-            self.engine.current_quote.items.pop(absolute_index)
-            self.refresh_ui()
+        self.engine.remove_from_cart(self.customer_name, absolute_index)
+        self.refresh_ui()
+        self.parent_dashboard.update_cart_btn()
+        self.parent_dashboard.sync_checkboxes_with_cart()
+        self.parent_dashboard.silent_save_draft(self.customer_name)
 
-    def clear_all_items(self):
-        if self.engine.current_quote and self.engine.current_quote.items:
-            reply = QMessageBox.question(self, "Clear All", "Remove all items?", QMessageBox.Yes | QMessageBox.No)
-            if reply == QMessageBox.Yes:
-                self.engine.current_quote.items.clear()
-                self.refresh_ui()
-
-    def delete_draft_file(self):
-        file, _ = QFileDialog.getOpenFileName(self, "Delete Draft", "drafts", "Excel Files (*.xlsx)")
-        if file:
-            filename = os.path.basename(file)
-            reply = QMessageBox.question(self, "Confirm", f"Permanently delete {filename}?", QMessageBox.Yes | QMessageBox.No)
-            if reply == QMessageBox.Yes:
-                try:
-                    os.remove(file)
-                    QMessageBox.information(self, "Deleted", "Draft deleted.")
-                    self.main_window.refresh_dashboard() 
-                except Exception as e:
-                    QMessageBox.critical(self, "Error", f"Could not delete: {e}")
+    def empty_cart(self):
+        reply = QMessageBox.question(self, "Clear Cart", "Remove all items?", QMessageBox.Yes | QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            self.engine.clear_cart(self.customer_name)
+            self.parent_dashboard.update_cart_btn()
+            self.parent_dashboard.sync_checkboxes_with_cart()
+            self.parent_dashboard.silent_save_draft(self.customer_name)
+            self.close()
 
     def refresh_ui(self):
-        if not self.engine.current_quote: return
-        quote = self.engine.current_quote
-        self.client_name.setText(quote.client.name)
-        self.quote_num.setText(quote.quote_id)
-        
+        cart = self.engine.get_cart(self.customer_name)
         self.products_table.setRowCount(0)
         self.services_table.setRowCount(0)
+        p_row, s_row = 0, 0
         
-        p_row = 0
-        s_row = 0
-        
-        for absolute_idx, item in enumerate(quote.items):
+        for absolute_idx, item in enumerate(cart.items):
             is_service = (item.product.category.strip().lower() == 'service')
             target_table = self.services_table if is_service else self.products_table
             current_row = s_row if is_service else p_row
@@ -841,101 +249,789 @@ class NewQuotationView(QWidget):
             qty_spin.setValue(item.quantity)
             qty_spin.valueChanged.connect(lambda val, idx=absolute_idx: self.update_qty(idx, val))
             
+            disc_spin = QDoubleSpinBox()
+            disc_spin.setRange(0, 100)
+            disc_spin.setValue(item.discount_percent)
+            disc_spin.valueChanged.connect(lambda val, idx=absolute_idx: self.update_discount(idx, val))
+            
             btn_del = QPushButton("X")
             btn_del.setObjectName("danger_btn")
             btn_del.clicked.connect(lambda checked, idx=absolute_idx: self.delete_item(idx))
             
             if is_service:
-                target_table.setItem(current_row, 2, QTableWidgetItem(item.product.skillset))
-                
                 lvl_combo = QComboBox()
                 lvl_combo.addItems(["Level 1", "Level 2", "Level 3"])
                 lvl_combo.setCurrentText(f"Level {item.service_level}")
                 lvl_combo.currentTextChanged.connect(lambda txt, idx=absolute_idx: self.update_service_level(idx, txt))
                 
-                target_table.setCellWidget(current_row, 3, lvl_combo)
-                target_table.setCellWidget(current_row, 4, qty_spin)
-                target_table.setItem(current_row, 5, QTableWidgetItem(f"₹{item.subtotal:,.2f}"))
-                target_table.setCellWidget(current_row, 6, btn_del)
+                target_table.setCellWidget(current_row, 2, lvl_combo)
+                target_table.setCellWidget(current_row, 3, qty_spin) 
+                target_table.setItem(current_row, 4, QTableWidgetItem(f"₹{item.active_price:,.2f}"))
+                target_table.setCellWidget(current_row, 5, disc_spin)
+                target_table.setItem(current_row, 6, QTableWidgetItem(f"₹{item.subtotal:,.2f}"))
+                target_table.setCellWidget(current_row, 7, btn_del)
                 s_row += 1
             else:
-                target_table.setItem(current_row, 2, QTableWidgetItem(item.product.specification))
-                target_table.setItem(current_row, 3, QTableWidgetItem(item.product.make))
-                target_table.setItem(current_row, 4, QTableWidgetItem(item.product.model))
-                target_table.setCellWidget(current_row, 5, qty_spin)
-                target_table.setItem(current_row, 6, QTableWidgetItem(f"₹{item.active_price:,.2f}"))
-                target_table.setItem(current_row, 7, QTableWidgetItem(f"₹{item.subtotal:,.2f}"))
-                target_table.setCellWidget(current_row, 8, btn_del)
+                target_table.setCellWidget(current_row, 2, qty_spin) 
+                target_table.setItem(current_row, 3, QTableWidgetItem(f"₹{item.active_price:,.2f}"))
+                target_table.setCellWidget(current_row, 4, disc_spin)
+                target_table.setItem(current_row, 5, QTableWidgetItem(f"₹{item.subtotal:,.2f}"))
+                target_table.setCellWidget(current_row, 6, btn_del)
                 p_row += 1
             
-        summary = self.engine.get_summary()
-        self.lbl_subtotal.setText(f"₹{summary['subtotal']:,.2f}")
-        self.lbl_total.setText(f"₹{summary['total']:,.2f}")
-        
-        # We only update the preview if it is visible to save computing power
-        if not self.right_pane.isHidden():
-            self.update_excel_preview()
-
-    def handle_save_overwrite(self, folder, default_name):
-        base_path = os.path.join(folder, f"{default_name}.xlsx")
-        if not os.path.exists(base_path): return base_path
-        msg = QMessageBox(self)
-        msg.setWindowTitle("File Exists")
-        msg.setText("A file with this name already exists.")
-        btn_over = msg.addButton("Overwrite", QMessageBox.AcceptRole)
-        btn_copy = msg.addButton("Save as Copy", QMessageBox.ActionRole)
-        btn_can = msg.addButton("Cancel", QMessageBox.RejectRole)
-        msg.exec()
-        if msg.clickedButton() == btn_can: return None
-        if msg.clickedButton() == btn_over: return base_path
-        
-        count = 2
-        while os.path.exists(os.path.join(folder, f"{default_name}_{count}.xlsx")):
-            count += 1
-        return os.path.join(folder, f"{default_name}_{count}.xlsx")
-
-    def save_draft(self):
-        # Prevent saving if the quote doesn't exist or has no items
-        if not self.engine.current_quote or not self.engine.current_quote.items:
-            QMessageBox.warning(self, "Empty Quote", "Please add at least one product or service before saving a draft.")
-            return
-            
-        default = self.client_name.text() or self.quote_num.text()
-        name, ok = QInputDialog.getText(self, "Save Draft", "Draft Name:", QLineEdit.Normal, default)
-        
-        if ok and name:
-            filepath = self.handle_save_overwrite("drafts", name)
-            if filepath:
-                try:
-                    ExcelGenerator.generate_quote_excel(self.engine.current_quote, filepath)
-                    QMessageBox.information(self, "Success", "Draft saved successfully.")
-                    self.main_window.refresh_dashboard()
-                except Exception as e:
-                    QMessageBox.critical(self, "Template Error", str(e))
+        self.lbl_total.setText(f"₹{cart.total:,.2f}")
 
     def export_final(self):
-        # Prevent exporting if the quote doesn't exist or has no items
-        if not self.engine.current_quote or not self.engine.current_quote.items:
-            QMessageBox.warning(self, "Empty Quote", "Please add at least one product or service before exporting.")
+        cart = self.engine.get_cart(self.customer_name)
+        if not cart.items:
+            QMessageBox.warning(self, "Empty Cart", "Cart is empty!")
             return
             
-        filepath = self.handle_save_overwrite("output", self.quote_num.text())
-        if filepath:
-            try:
-                ExcelGenerator.generate_quote_excel(self.engine.current_quote, filepath)
-                QMessageBox.information(self, "Success", "Final quote exported.")
-                self.main_window.refresh_dashboard()
-            except Exception as e:
-                QMessageBox.critical(self, "Template Error", str(e))
+        default_name = cart.quote_id
+        base_path = os.path.join("output", f"{default_name}.xlsx")
+        
+        if os.path.exists(base_path):
+            count = 2
+            while os.path.exists(os.path.join("output", f"{default_name}_{count}.xlsx")):
+                count += 1
+            base_path = os.path.join("output", f"{default_name}_{count}.xlsx")
 
-    def import_draft(self):
-        file, _ = QFileDialog.getOpenFileName(self, "Select Draft", "drafts", "Excel Files (*.xlsx)")
-        if file:
+        try:
+            ExcelGenerator.generate_quote_excel(cart, base_path)
+            QMessageBox.information(self, "Success", f"Quote exported successfully to:\n{base_path}")
+            
+            self.engine.clear_cart(self.customer_name)
+            self.parent_dashboard.update_cart_btn()
+            self.parent_dashboard.sync_checkboxes_with_cart()
+            self.parent_dashboard.silent_save_draft(self.customer_name)
+            
+            self.close()
+            self.parent_dashboard.main_window.refresh_dashboard()
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", str(e))
+
+
+# ==========================================
+# VIEWS
+# ==========================================
+class DashboardView(QWidget):
+    def __init__(self):
+        super().__init__()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(30, 30, 30, 30)
+        layout.addWidget(QLabel("Dashboard", objectName="h1"))
+        
+        stats_layout = QHBoxLayout()
+        stats_layout.setSpacing(20)
+        self.lbl_total_prods = self._create_stat_card("TOTAL PRODUCTS", "0", "In Database")
+        self.lbl_revenue = self._create_stat_card("LIFETIME REVENUE", "₹0.00", "Finalized Quotes")
+        
+        stats_layout.addWidget(self.lbl_total_prods[0])
+        stats_layout.addWidget(self.lbl_revenue[0])
+        stats_layout.addStretch()
+        layout.addLayout(stats_layout)
+        
+        layout.addSpacing(20)
+        layout.addWidget(QLabel("Recent Activity", objectName="h2"))
+        
+        self.table = QTableWidget(0, 4)
+        self.table.setHorizontalHeaderLabels(["ID", "CLIENT", "TOTAL", "DATE"])
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.verticalHeader().setVisible(False)
+        layout.addWidget(self.table)
+
+    def _create_stat_card(self, title, val, subtitle):
+        card = QFrame(objectName="surface")
+        card.setMinimumSize(300, 120)
+        card.setMaximumWidth(400)
+        l = QVBoxLayout(card)
+        l.setContentsMargins(25, 20, 25, 20)
+        l.addWidget(QLabel(title, objectName="muted"))
+        val_lbl = QLabel(val, objectName="stat_val")
+        l.addWidget(val_lbl)
+        l.addWidget(QLabel(subtitle, objectName="muted"))
+        return card, val_lbl, None
+
+    def refresh_dashboard(self, catalog_mgr):
+        self.lbl_total_prods[1].setText(f"{len(catalog_mgr.load_catalog()):,}")
+        history = []
+        total_revenue = 0.0
+        
+        if os.path.exists("output"):
+            import openpyxl
+            outputs = [f for f in os.listdir("output") if f.endswith(".xlsx")]
+            for o in outputs:
+                path = os.path.join("output", o)
+                try:
+                    wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
+                    ws = wb.active
+                    client = "Unknown"
+                    qid = os.path.splitext(os.path.basename(path))[0]
+                    total = 0.0
+                    for row in ws.iter_rows(values_only=True):
+                        for val in row:
+                            if not val: continue
+                            val_str = str(val).strip()
+                            if "Client:" in val_str: client = val_str.replace("Client:", "").strip()
+                            elif "Quote #:" in val_str: qid = val_str.replace("Quote #:", "").strip()
+                            elif "Total:" in val_str or "Total price" in val_str:
+                                for p_val in row:
+                                    if isinstance(p_val, (int, float)): total = float(p_val)
+                    
+                    date_str = datetime.fromtimestamp(os.path.getmtime(path)).strftime('%d-%m-%Y')
+                    history.append({
+                        "id": qid, "client": client, "total": total, 
+                        "date": date_str, "timestamp": os.path.getmtime(path)
+                    })
+                    total_revenue += total
+                    wb.close()
+                except Exception:
+                    pass
+                
+        self.lbl_revenue[1].setText(f"₹{total_revenue:,.2f}")
+        history.sort(key=lambda x: x['timestamp'], reverse=True)
+        self.table.setRowCount(len(history))
+        for row, item in enumerate(history):
+            self.table.setItem(row, 0, QTableWidgetItem(item['id']))
+            self.table.setItem(row, 1, QTableWidgetItem(item['client']))
+            self.table.setItem(row, 2, QTableWidgetItem(f"₹{item['total']:,.2f}"))
+            self.table.setItem(row, 3, QTableWidgetItem(item['date']))
+
+
+class ProductDatabaseView(QWidget):
+    def __init__(self, catalog_mgr, quote_engine, main_window):
+        super().__init__()
+        self.catalog = catalog_mgr
+        self.engine = quote_engine
+        self.main_window = main_window
+        self.all_products = []
+        self._is_loading = False 
+        
+        self.active_highlight_names = set()
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(30, 30, 30, 30)
+        
+        cart_bar = QFrame(objectName="surface")
+        cart_l = QHBoxLayout(cart_bar)
+        cart_l.addWidget(QLabel("Current Customer:"))
+        self.customer_input = QLineEdit()
+        self.customer_input.setPlaceholderText("Walk-in Customer")
+        
+        # Connect to live draft listener
+        self.customer_input.textChanged.connect(self.on_customer_changed)
+        
+        cart_l.addWidget(self.customer_input)
+        cart_l.addStretch()
+        
+        self.btn_view_cart = QPushButton("🛒 View Cart (0)")
+        self.btn_view_cart.setObjectName("primary_btn")
+        self.btn_view_cart.clicked.connect(self.open_cart)
+        cart_l.addWidget(self.btn_view_cart)
+        layout.addWidget(cart_bar)
+        
+        header = QHBoxLayout()
+        header.addWidget(QLabel("Product Database", objectName="h1"))
+        header.addStretch()
+        btn_add_row = QPushButton("+ Add Empty Row")
+        btn_add_row.clicked.connect(self.add_empty_row)
+        header.addWidget(btn_add_row)
+        layout.addLayout(header)
+        
+        filter_layout = QHBoxLayout()
+        self.search_box = QLineEdit()
+        self.search_box.setPlaceholderText("Search all columns...")
+        self.search_box.textChanged.connect(self.apply_filters)
+        
+        self.category_cb = QComboBox()
+        self.category_cb.currentTextChanged.connect(self.apply_filters)
+        self.supplier_cb = QComboBox()
+        self.supplier_cb.currentTextChanged.connect(self.apply_filters)
+        
+        self.btn_clear_filters = QPushButton("❌ Clear Filters")
+        self.btn_clear_filters.clicked.connect(self.clear_filters)
+        
+        filter_layout.addWidget(QLabel("🔍 Filter:"))
+        filter_layout.addWidget(self.search_box)
+        filter_layout.addWidget(QLabel("Category:"))
+        filter_layout.addWidget(self.category_cb)
+        filter_layout.addWidget(QLabel("Supplier:"))
+        filter_layout.addWidget(self.supplier_cb)
+        filter_layout.addWidget(self.btn_clear_filters)
+        filter_layout.addStretch()
+        layout.addLayout(filter_layout)
+        
+        self.tabs = QTabWidget()
+        
+        self.tab_products = QWidget()
+        prod_layout = QVBoxLayout(self.tab_products)
+        prod_layout.setContentsMargins(0, 10, 0, 0)
+        self.products_table = QTableWidget(0, 13)
+        self.products_table.setHorizontalHeaderLabels([
+            "Add", "NAME", "CATEGORY", "MAKE", "MODEL", "SPECIFICATION", 
+            "PRICE (₹)", "DISC (%)", "TOTAL (₹)", "SUPPLIER", "CONTACT INFO", "REFERENCE", "LAST UPDATED"
+        ])
+        self.setup_table(self.products_table, self.on_product_edited)
+        prod_layout.addWidget(self.products_table)
+        self.tabs.addTab(self.tab_products, "🛒 Products")
+
+        self.tab_services = QWidget()
+        serv_layout = QVBoxLayout(self.tab_services)
+        serv_layout.setContentsMargins(0, 10, 0, 0)
+        self.services_table = QTableWidget(0, 13)
+        self.services_table.setHorizontalHeaderLabels([
+            "Add", "NAME", "CATEGORY", "SKILLSET", "L1 / BASE (₹)", 
+            "L2 (₹)", "L3 (₹)", "DISC (%)", "TOTAL (₹)", "SUPPLIER", "CONTACT INFO", "REFERENCE", "LAST UPDATED"
+        ])
+        self.setup_table(self.services_table, self.on_service_edited)
+        serv_layout.addWidget(self.services_table)
+        self.tabs.addTab(self.tab_services, "🛠 Services")
+
+        layout.addWidget(self.tabs)
+
+    def on_customer_changed(self, text):
+        cust = text.strip() or "Walk-in Customer"
+        self.load_draft_silently(cust)
+        self.update_cart_btn()
+        self.sync_checkboxes_with_cart()
+
+    def load_draft_silently(self, cust):
+        filepath = f"drafts/{cust}.json"
+        cart = self.engine.get_cart(cust)
+        if not os.path.exists(filepath):
+            return
+            
+        try:
+            with open(filepath, "r") as f:
+                data = json.load(f)
+                
+            cart.items = [] 
+            for item_data in data.get("items", []):
+                p_data = item_data["product"]
+                p = Product(
+                    name=p_data.get("name", ""),
+                    category=p_data.get("category", ""),
+                    make=p_data.get("make", ""),
+                    model=p_data.get("model", ""),
+                    specification=p_data.get("specification", ""),
+                    unit_price=p_data.get("unit_price", 0.0),
+                    price_l2=p_data.get("price_l2", 0.0),
+                    price_l3=p_data.get("price_l3", 0.0),
+                    discount=p_data.get("discount", 0.0),
+                    supplier=p_data.get("supplier", ""),
+                    supplier_contact=p_data.get("supplier_contact", ""),
+                    reference=p_data.get("reference", ""),
+                    skillset=p_data.get("skillset", ""),
+                    description=p_data.get("description", ""),
+                    last_updated=p_data.get("last_updated", ""),
+                    uid=p_data.get("uid", uuid.uuid4().hex)
+                )
+                qi = QuoteItem(
+                    product=p,
+                    quantity=item_data.get("quantity", 1),
+                    discount_percent=item_data.get("discount_percent", p.discount),
+                    service_level=item_data.get("service_level", 1)
+                )
+                cart.items.append(qi)
+        except Exception:
+            pass
+
+    def setup_table(self, table, change_handler):
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        table.horizontalHeader().setStretchLastSection(True)
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
+        table.horizontalHeader().resizeSection(0, 35)  
+        table.horizontalHeader().resizeSection(1, 200) 
+        table.verticalHeader().setVisible(False)
+        table.setSortingEnabled(True)
+        
+        # Connect new double click clearing mechanism
+        table.cellDoubleClicked.connect(lambda r, c, t=table: self.on_cell_double_clicked(r, c, t))
+        
+        table.setContextMenuPolicy(Qt.CustomContextMenu)
+        table.customContextMenuRequested.connect(lambda pos, t=table: self.show_context_menu(pos, t))
+        table.cellChanged.connect(change_handler)
+
+    def count_name_occurrences(self, name):
+        count = 0
+        for table in [self.products_table, self.services_table]:
+            for row in range(table.rowCount()):
+                item = table.item(row, 1)
+                if item and item.text().strip().lower() == name:
+                    count += 1
+        return count
+
+    def apply_name_highlights(self):
+        highlight_color = QColor(239, 68, 68, 50)
+        self._is_loading = True
+        
+        for table in [self.products_table, self.services_table]:
+            for row in range(table.rowCount()):
+                name_item = table.item(row, 1)
+                name = name_item.text().strip().lower() if name_item else ""
+                
+                is_highlighted = bool(name and name in self.active_highlight_names)
+                
+                for col in range(table.columnCount()):
+                    item = table.item(row, col)
+                    if item:
+                        if is_highlighted:
+                            item.setBackground(highlight_color)
+                        else:
+                            item.setData(Qt.BackgroundRole, None)
+        self._is_loading = False
+
+    def on_cell_double_clicked(self, row, col, table):
+        name_item = table.item(row, 1)
+        if name_item:
+            name = name_item.text().strip().lower()
+            if name in self.active_highlight_names:
+                self.active_highlight_names.discard(name)
+                self.apply_name_highlights()
+
+    def clear_filters(self):
+        self.search_box.blockSignals(True)
+        self.category_cb.blockSignals(True)
+        self.supplier_cb.blockSignals(True)
+        self.search_box.clear()
+        self.category_cb.setCurrentIndex(0)
+        self.supplier_cb.setCurrentIndex(0)
+        self.search_box.blockSignals(False)
+        self.category_cb.blockSignals(False)
+        self.supplier_cb.blockSignals(False)
+        self.apply_filters()
+
+    def show_context_menu(self, pos, table):
+        row = table.rowAt(pos.y())
+        if row >= 0:
+            menu = QMenu(self)
+            del_action = menu.addAction("🗑 Delete Row")
+            action = menu.exec(table.viewport().mapToGlobal(pos))
+            if action == del_action:
+                reply = QMessageBox.question(self, "Verify Deletion", "Are you sure you want to permanently delete this row?", QMessageBox.Yes | QMessageBox.No)
+                if reply == QMessageBox.Yes:
+                    self._is_loading = True
+                    table.removeRow(row)
+                    self._is_loading = False
+                    self.save_database()
+
+    def update_cart_btn(self):
+        cust = self.customer_input.text().strip() or "Walk-in Customer"
+        cart = self.engine.get_cart(cust)
+        count = len(cart.items) 
+        self.btn_view_cart.setText(f"🛒 View Cart ({count})")
+
+    def sync_checkboxes_with_cart(self):
+        self._is_loading = True
+        cust = self.customer_input.text().strip() or "Walk-in Customer"
+        cart = self.engine.get_cart(cust)
+        
+        # We now match by UID securely to ensure exact identical-twin rows are remembered!
+        cart_uids = set(item.product.uid for item in cart.items)
+        
+        for table in [self.products_table, self.services_table]:
+            for row in range(table.rowCount()):
+                chk = table.item(row, 0)
+                if chk:
+                    row_uid = chk.data(Qt.UserRole)
+                    if row_uid in cart_uids:
+                        chk.setCheckState(Qt.Checked)
+                    else:
+                        chk.setCheckState(Qt.Unchecked)
+        self._is_loading = False
+
+    def silent_save_draft(self, customer_name=None):
+        cust = customer_name or (self.customer_input.text().strip() or "Walk-in Customer")
+        cart = self.engine.get_cart(cust)
+        
+        if not cart.items:
+            filepath = f"drafts/{cust}.json"
+            if os.path.exists(filepath):
+                try: os.remove(filepath)
+                except: pass
+            return
+            
+        draft_data = {"items": []}
+        for i in cart.items:
+            draft_data["items"].append({
+                "product": {
+                    "name": i.product.name,
+                    "category": i.product.category,
+                    "description": i.product.description,
+                    "unit_price": i.product.unit_price,
+                    "price_l2": i.product.price_l2,
+                    "price_l3": i.product.price_l3,
+                    "discount": i.product.discount,
+                    "supplier": i.product.supplier,
+                    "supplier_contact": i.product.supplier_contact,
+                    "make": i.product.make,
+                    "model": i.product.model,
+                    "specification": i.product.specification,
+                    "skillset": i.product.skillset,
+                    "reference": i.product.reference,
+                    "last_updated": i.product.last_updated,
+                    "uid": i.product.uid # Ensure UID is saved!
+                },
+                "quantity": i.quantity,
+                "discount_percent": i.discount_percent,
+                "service_level": i.service_level
+            })
+            
+        with open(f"drafts/{cust}.json", "w") as f:
+            json.dump(draft_data, f)
+
+    def open_cart(self):
+        cust = self.customer_input.text().strip() or "Walk-in Customer"
+        dialog = CartDialog(self.engine, cust, self)
+        dialog.exec()
+
+    def process_auto_add(self, row, table, is_service):
+        chk = table.item(row, 0)
+        if not chk: return
+
+        name_item = table.item(row, 1)
+        if not name_item or not name_item.text().strip():
+            if chk.checkState() == Qt.Checked:
+                self._is_loading = True
+                chk.setCheckState(Qt.Unchecked)
+                self._is_loading = False
+                QMessageBox.warning(self, "Invalid Product", "You cannot add an empty row to the cart.")
+            return
+
+        cust = self.customer_input.text().strip() or "Walk-in Customer"
+        product_name = name_item.text().strip()
+        uid_val = chk.data(Qt.UserRole) 
+
+        if chk.checkState() == Qt.Checked:
+            qty, ok = QInputDialog.getInt(self, "Add to Cart", f"Quantity for {product_name}:", 1, 1, 9999)
+            if ok:
+                if is_service:
+                    p = Product(
+                        name=product_name,
+                        category=table.item(row, 2).text() if table.item(row, 2) else "",
+                        skillset=table.item(row, 3).text() if table.item(row, 3) else "",
+                        unit_price=float(table.item(row, 4).text() or 0) if table.item(row, 4) else 0.0,
+                        price_l2=float(table.item(row, 5).text() or 0) if table.item(row, 5) else 0.0,
+                        price_l3=float(table.item(row, 6).text() or 0) if table.item(row, 6) else 0.0,
+                        discount=float(table.item(row, 7).text() or 0) if table.item(row, 7) else 0.0,
+                        supplier=table.item(row, 9).text() if table.item(row, 9) else "",
+                        supplier_contact=table.item(row, 10).text() if table.item(row, 10) else "",
+                        reference=table.item(row, 11).text() if table.item(row, 11) else "",
+                        description="",
+                        uid=uid_val
+                    )
+                else:
+                    p = Product(
+                        name=product_name,
+                        category=table.item(row, 2).text() if table.item(row, 2) else "",
+                        make=table.item(row, 3).text() if table.item(row, 3) else "",
+                        model=table.item(row, 4).text() if table.item(row, 4) else "",
+                        specification=table.item(row, 5).text() if table.item(row, 5) else "",
+                        unit_price=float(table.item(row, 6).text() or 0) if table.item(row, 6) else 0.0,
+                        discount=float(table.item(row, 7).text() or 0) if table.item(row, 7) else 0.0,
+                        supplier=table.item(row, 9).text() if table.item(row, 9) else "",
+                        supplier_contact=table.item(row, 10).text() if table.item(row, 10) else "",
+                        reference=table.item(row, 11).text() if table.item(row, 11) else "",
+                        description="",
+                        uid=uid_val
+                    )
+                self.engine.add_to_cart(cust, p, quantity=qty)
+                self.update_cart_btn()
+                self.silent_save_draft(cust) 
+            else:
+                self._is_loading = True
+                chk.setCheckState(Qt.Unchecked)
+                self._is_loading = False
+        else:
+            cart = self.engine.get_cart(cust)
+            items_to_remove = [i for i, item in enumerate(cart.items) if item.product.uid == uid_val]
+            for i in reversed(items_to_remove):
+                self.engine.remove_from_cart(cust, i)
+            
+            self.update_cart_btn()
+            self.silent_save_draft(cust) 
+
+    def on_product_edited(self, row, col):
+        if self._is_loading: return
+        if col == 0:
+            self.process_auto_add(row, self.products_table, is_service=False)
+            return
+            
+        self._is_loading = True
+        
+        # New Highlighting Trigger: Only highlight if editing NAME results in a duplicate
+        if col == 1:
+            name_item = self.products_table.item(row, 1)
+            if name_item:
+                name = name_item.text().strip().lower()
+                if name:
+                    count = self.count_name_occurrences(name)
+                    if count > 1:
+                        self.active_highlight_names.add(name)
+                    else:
+                        self.active_highlight_names.discard(name)
+            self.apply_name_highlights()
+            
+        if col in [6, 7]:
             try:
-                self.engine.current_quote = ExcelGenerator.load_quote_excel(file, self.main_window.catalog_mgr)
-                self.refresh_ui()
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to load draft: {e}")
+                price = float(self.products_table.item(row, 6).text() or 0)
+                disc = float(self.products_table.item(row, 7).text() or 0)
+                total = price * (1 - (disc / 100))
+                t_item = QTableWidgetItem(f"{total:,.2f}")
+                t_item.setFlags(t_item.flags() & ~Qt.ItemIsEditable) 
+                self.products_table.setItem(row, 8, t_item)
+            except ValueError:
+                pass
+                
+        if col == 6:
+            self.products_table.setItem(row, 12, QTableWidgetItem(datetime.now().strftime("%d-%m-%Y")))
+        
+        self.save_database()
+        self._is_loading = False
+
+    def on_service_edited(self, row, col):
+        if self._is_loading: return
+        if col == 0:
+            self.process_auto_add(row, self.services_table, is_service=True)
+            return
+            
+        self._is_loading = True
+        
+        # New Highlighting Trigger
+        if col == 1:
+            name_item = self.services_table.item(row, 1)
+            if name_item:
+                name = name_item.text().strip().lower()
+                if name:
+                    count = self.count_name_occurrences(name)
+                    if count > 1:
+                        self.active_highlight_names.add(name)
+                    else:
+                        self.active_highlight_names.discard(name)
+            self.apply_name_highlights()
+            
+        if col in [4, 7]:
+            try:
+                price = float(self.services_table.item(row, 4).text() or 0)
+                disc = float(self.services_table.item(row, 7).text() or 0)
+                total = price * (1 - (disc / 100))
+                t_item = QTableWidgetItem(f"{total:,.2f}")
+                t_item.setFlags(t_item.flags() & ~Qt.ItemIsEditable)
+                self.services_table.setItem(row, 8, t_item)
+            except ValueError:
+                pass
+                
+        if col in [4, 5, 6]:
+            self.services_table.setItem(row, 12, QTableWidgetItem(datetime.now().strftime("%d-%m-%Y")))
+        
+        self.save_database()
+        self._is_loading = False
+
+    def add_empty_row(self):
+        self._is_loading = True
+        target_table = self.products_table if self.tabs.currentIndex() == 0 else self.services_table
+        target_table.setSortingEnabled(False)
+        
+        row = target_table.rowCount()
+        target_table.insertRow(row)
+        
+        chk = QTableWidgetItem()
+        chk.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+        chk.setCheckState(Qt.Unchecked)
+        
+        # Assign a brand new UID to this new row securely!
+        new_uid = uuid.uuid4().hex
+        chk.setData(Qt.UserRole, new_uid)
+        target_table.setItem(row, 0, chk)
+        
+        for c in range(1, 12):
+            target_table.setItem(row, c, QTableWidgetItem(""))
+            
+        target_table.setItem(row, 12, QTableWidgetItem(datetime.now().strftime("%d-%m-%Y")))
+        target_table.setSortingEnabled(True)
+        self._is_loading = False
+
+    def load_data(self):
+        self._is_loading = True
+        self.all_products = self.catalog.load_catalog()
+        
+        categories = ["All Categories"] + sorted(list(set(p.category for p in self.all_products if p.category)))
+        suppliers = ["All Suppliers"] + sorted(list(set(p.supplier for p in self.all_products if p.supplier)))
+        self.category_cb.blockSignals(True)
+        self.supplier_cb.blockSignals(True)
+        self.category_cb.clear()
+        self.supplier_cb.clear()
+        self.category_cb.addItems(categories)
+        self.supplier_cb.addItems(suppliers)
+        self.category_cb.blockSignals(False)
+        self.supplier_cb.blockSignals(False)
+        
+        prods = [p for p in self.all_products if p.category.strip().lower() != 'service']
+        servs = [p for p in self.all_products if p.category.strip().lower() == 'service']
+        self.populate_tables(prods, servs)
+        self.apply_filters()
+        self._is_loading = False
+
+    def apply_filters(self):
+        search = self.search_box.text().lower()
+        cat = self.category_cb.currentText()
+        sup = self.supplier_cb.currentText()
+        
+        for row in range(self.products_table.rowCount()):
+            name = self.products_table.item(row, 1).text() if self.products_table.item(row, 1) else ""
+            category = self.products_table.item(row, 2).text() if self.products_table.item(row, 2) else ""
+            make = self.products_table.item(row, 3).text() if self.products_table.item(row, 3) else ""
+            model = self.products_table.item(row, 4).text() if self.products_table.item(row, 4) else ""
+            spec = self.products_table.item(row, 5).text() if self.products_table.item(row, 5) else ""
+            supplier = self.products_table.item(row, 9).text() if self.products_table.item(row, 9) else ""
+            reference = self.products_table.item(row, 11).text() if self.products_table.item(row, 11) else ""
+            
+            massive_string = f"{name} {category} {make} {model} {spec} {supplier} {reference}".lower()
+            match_search = (search in massive_string)
+            match_cat = (cat == "All Categories" or category == cat)
+            match_sup = (sup == "All Suppliers" or supplier == sup)
+            
+            self.products_table.setRowHidden(row, not (match_search and match_cat and match_sup))
+            
+        for row in range(self.services_table.rowCount()):
+            name = self.services_table.item(row, 1).text() if self.services_table.item(row, 1) else ""
+            category = self.services_table.item(row, 2).text() if self.services_table.item(row, 2) else ""
+            skillset = self.services_table.item(row, 3).text() if self.services_table.item(row, 3) else ""
+            supplier = self.services_table.item(row, 9).text() if self.services_table.item(row, 9) else ""
+            reference = self.services_table.item(row, 11).text() if self.services_table.item(row, 11) else ""
+            
+            massive_string = f"{name} {category} {skillset} {supplier} {reference}".lower()
+            match_search = (search in massive_string)
+            match_cat = (cat == "All Categories" or category == cat)
+            match_sup = (sup == "All Suppliers" or supplier == sup)
+            
+            self.services_table.setRowHidden(row, not (match_search and match_cat and match_sup))
+
+    def populate_tables(self, products, services):
+        self.products_table.setSortingEnabled(False)
+        self.services_table.setSortingEnabled(False)
+        
+        self.products_table.setRowCount(len(products))
+        for row, p in enumerate(products):
+            chk = QTableWidgetItem()
+            chk.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            chk.setCheckState(Qt.Unchecked)
+            
+            # Mount the UID so it can be retrieved!
+            chk.setData(Qt.UserRole, p.uid)
+            
+            self.products_table.setItem(row, 0, chk)
+            self.products_table.setItem(row, 1, QTableWidgetItem(p.name))
+            self.products_table.setItem(row, 2, QTableWidgetItem(p.category))
+            self.products_table.setItem(row, 3, QTableWidgetItem(p.make))
+            self.products_table.setItem(row, 4, QTableWidgetItem(p.model))
+            self.products_table.setItem(row, 5, QTableWidgetItem(p.specification))
+            
+            p_item = QTableWidgetItem(); p_item.setData(Qt.DisplayRole, p.unit_price)
+            d_item = QTableWidgetItem(); d_item.setData(Qt.DisplayRole, p.discount)
+            
+            total_price = p.unit_price * (1 - (p.discount / 100))
+            t_item = QTableWidgetItem(f"{total_price:,.2f}")
+            t_item.setFlags(t_item.flags() & ~Qt.ItemIsEditable) 
+            
+            self.products_table.setItem(row, 6, p_item)
+            self.products_table.setItem(row, 7, d_item)
+            self.products_table.setItem(row, 8, t_item)
+            self.products_table.setItem(row, 9, QTableWidgetItem(p.supplier))
+            self.products_table.setItem(row, 10, QTableWidgetItem(p.supplier_contact))
+            self.products_table.setItem(row, 11, QTableWidgetItem(p.reference))
+            self.products_table.setItem(row, 12, QTableWidgetItem(p.last_updated))
+
+        self.services_table.setRowCount(len(services))
+        for row, s in enumerate(services):
+            chk = QTableWidgetItem()
+            chk.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            chk.setCheckState(Qt.Unchecked)
+            
+            # Mount the UID so it can be retrieved!
+            chk.setData(Qt.UserRole, s.uid)
+            
+            self.services_table.setItem(row, 0, chk)
+            self.services_table.setItem(row, 1, QTableWidgetItem(s.name))
+            self.services_table.setItem(row, 2, QTableWidgetItem(s.category))
+            self.services_table.setItem(row, 3, QTableWidgetItem(s.skillset))
+            
+            l1 = QTableWidgetItem(); l1.setData(Qt.DisplayRole, s.unit_price)
+            l2 = QTableWidgetItem(); l2.setData(Qt.DisplayRole, s.price_l2)
+            l3 = QTableWidgetItem(); l3.setData(Qt.DisplayRole, s.price_l3)
+            disc = QTableWidgetItem(); disc.setData(Qt.DisplayRole, s.discount)
+            
+            total_price = s.unit_price * (1 - (s.discount / 100))
+            t_item = QTableWidgetItem(f"{total_price:,.2f}")
+            t_item.setFlags(t_item.flags() & ~Qt.ItemIsEditable) 
+            
+            self.services_table.setItem(row, 4, l1)
+            self.services_table.setItem(row, 5, l2)
+            self.services_table.setItem(row, 6, l3)
+            self.services_table.setItem(row, 7, disc)
+            self.services_table.setItem(row, 8, t_item)
+            self.services_table.setItem(row, 9, QTableWidgetItem(s.supplier))
+            self.services_table.setItem(row, 10, QTableWidgetItem(s.supplier_contact))
+            self.services_table.setItem(row, 11, QTableWidgetItem(s.reference))
+            self.services_table.setItem(row, 12, QTableWidgetItem(s.last_updated))
+
+        self.products_table.setSortingEnabled(True)
+        self.services_table.setSortingEnabled(True)
+        self.sync_checkboxes_with_cart()
+
+    def save_database(self):
+        final_list = []
+        today_str = datetime.now().strftime("%d-%m-%Y")
+        
+        for row in range(self.products_table.rowCount()):
+            pname = self.products_table.item(row, 1)
+            if pname and pname.text().strip():
+                uid_val = self.products_table.item(row, 0).data(Qt.UserRole)
+                d_val = self.products_table.item(row, 12).text() if self.products_table.item(row, 12) and self.products_table.item(row, 12).text().strip() else today_str
+                final_list.append(Product(
+                    name=pname.text(),
+                    category=self.products_table.item(row, 2).text() if self.products_table.item(row, 2) else "",
+                    make=self.products_table.item(row, 3).text() if self.products_table.item(row, 3) else "",
+                    model=self.products_table.item(row, 4).text() if self.products_table.item(row, 4) else "",
+                    specification=self.products_table.item(row, 5).text() if self.products_table.item(row, 5) else "",
+                    unit_price=float(self.products_table.item(row, 6).text() or 0) if self.products_table.item(row, 6) else 0.0,
+                    discount=float(self.products_table.item(row, 7).text() or 0) if self.products_table.item(row, 7) else 0.0,
+                    supplier=self.products_table.item(row, 9).text() if self.products_table.item(row, 9) else "",
+                    supplier_contact=self.products_table.item(row, 10).text() if self.products_table.item(row, 10) else "",
+                    reference=self.products_table.item(row, 11).text() if self.products_table.item(row, 11) else "",
+                    last_updated=d_val,
+                    uid=uid_val,
+                    description=""
+                ))
+                
+        for row in range(self.services_table.rowCount()):
+            sname = self.services_table.item(row, 1)
+            if sname and sname.text().strip():
+                uid_val = self.services_table.item(row, 0).data(Qt.UserRole)
+                d_val = self.services_table.item(row, 12).text() if self.services_table.item(row, 12) and self.services_table.item(row, 12).text().strip() else today_str
+                c_val = self.services_table.item(row, 2).text() if self.services_table.item(row, 2) else "Service"
+                if not c_val: c_val = "Service"
+                
+                final_list.append(Product(
+                    name=sname.text(),
+                    category=c_val,
+                    skillset=self.services_table.item(row, 3).text() if self.services_table.item(row, 3) else "",
+                    unit_price=float(self.services_table.item(row, 4).text() or 0) if self.services_table.item(row, 4) else 0.0,
+                    price_l2=float(self.services_table.item(row, 5).text() or 0) if self.services_table.item(row, 5) else 0.0,
+                    price_l3=float(self.services_table.item(row, 6).text() or 0) if self.services_table.item(row, 6) else 0.0,
+                    discount=float(self.services_table.item(row, 7).text() or 0) if self.services_table.item(row, 7) else 0.0,
+                    supplier=self.services_table.item(row, 9).text() if self.services_table.item(row, 9) else "",
+                    supplier_contact=self.services_table.item(row, 10).text() if self.services_table.item(row, 10) else "",
+                    reference=self.services_table.item(row, 11).text() if self.services_table.item(row, 11) else "",
+                    last_updated=d_val,
+                    uid=uid_val,
+                    description=""
+                ))
+                
+        self.catalog.save_catalog(final_list)
+        self.all_products = final_list
+
 
 # ==========================================
 # MAIN WINDOW CONTROLLER
@@ -943,104 +1039,205 @@ class NewQuotationView(QWidget):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        
+        self.settings = QSettings("QuotationPro", "AppConfig")
         self.setWindowTitle("Quotation Pro")
         self.resize(1280, 720)
-        self.is_dark = False 
+        
+        self.is_dark = self.settings.value("is_dark", False, type=bool)
+        self.is_collapsed = self.settings.value("sidebar_collapsed", False, type=bool)
         
         self.catalog_mgr = CatalogManager("data/catalog.xlsx")
         self.quote_engine = QuoteEngine()
         
         central = QWidget()
         self.setCentralWidget(central)
-        main_layout = QHBoxLayout(central)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
+        central_layout = QVBoxLayout(central)
+        central_layout.setContentsMargins(0, 0, 0, 0)
         
-        # Sidebar
-        self.sidebar = QFrame(objectName="surface")
-        self.sidebar.setFixedWidth(250)
-        sidebar_layout = QVBoxLayout(self.sidebar)
+        self.main_splitter = QSplitter(Qt.Horizontal)
+        central_layout.addWidget(self.main_splitter)
         
-        sidebar_layout.addWidget(QLabel("Quotation Pro", objectName="h2"))
+        # --- FIXED SIDEBAR WRAPPER ---
+        # This completely guarantees the 0-gap connection directly to the screen edge.
+        self.sidebar_wrapper = QFrame(objectName="surface")
+        wrapper_layout = QHBoxLayout(self.sidebar_wrapper)
+        wrapper_layout.setContentsMargins(0, 0, 0, 0)
+        wrapper_layout.setSpacing(0)
+        
+        self.sidebar_content = QWidget()
+        sidebar_layout = QVBoxLayout(self.sidebar_content)
+        
+        self.lbl_title = QLabel()
+        self.lbl_title.setObjectName("h2")
+        sidebar_layout.addWidget(self.lbl_title)
         sidebar_layout.addSpacing(30)
         
-        self.btn_dash = self._make_nav_btn("📊 Dashboard", 0)
-        self.btn_db = self._make_nav_btn("🗄️ Product Database", 1)
-        self.btn_quote = self._make_nav_btn("📝 New Quotation", 2)
+        self.btn_dash = self._make_nav_btn("📊", "Dashboard", 0)
+        self.btn_db = self._make_nav_btn("🗄️", "Product Database", 1)
         
         sidebar_layout.addWidget(self.btn_dash)
         sidebar_layout.addWidget(self.btn_db)
-        sidebar_layout.addWidget(self.btn_quote)
         sidebar_layout.addStretch()
         
-        self.btn_theme = QPushButton("🌙 Toggle Theme", objectName="sidebar_btn")
+        self.btn_theme = QPushButton()
         self.btn_theme.clicked.connect(self.toggle_theme)
         sidebar_layout.addWidget(self.btn_theme)
-        main_layout.addWidget(self.sidebar)
         
-        # Stacked Views
+        wrapper_layout.addWidget(self.sidebar_content)
+        
+        # Collapse Arrow Container
+        toggle_container = QWidget()
+        toggle_container.setFixedWidth(16)
+        toggle_layout = QVBoxLayout(toggle_container)
+        toggle_layout.setContentsMargins(0, 0, 0, 0)
+        toggle_layout.addStretch()
+        
+        self.btn_toggle_sidebar = QPushButton()
+        self.btn_toggle_sidebar.setObjectName("collapse_btn")
+        self.btn_toggle_sidebar.setFixedSize(16, 50)
+        self.btn_toggle_sidebar.clicked.connect(self.toggle_sidebar)
+        
+        toggle_layout.addWidget(self.btn_toggle_sidebar)
+        toggle_layout.addStretch()
+        
+        wrapper_layout.addWidget(toggle_container)
+        self.main_splitter.addWidget(self.sidebar_wrapper)
+        
+        # --- RIGHT CONTENT STACK ---
         self.content_stack = QStackedWidget()
         self.view_dashboard = DashboardView()
-        self.view_product_db = ProductDatabaseView(self.catalog_mgr, self)
-        self.view_new_quote = NewQuotationView(self.quote_engine, self)
+        self.view_product_db = ProductDatabaseView(self.catalog_mgr, self.quote_engine, self)
         
         self.content_stack.addWidget(self.view_dashboard)
         self.content_stack.addWidget(self.view_product_db)
-        self.content_stack.addWidget(self.view_new_quote)
-        main_layout.addWidget(self.content_stack)
         
-        self.apply_theme()
-        self.switch_view(0)
+        self.main_splitter.addWidget(self.content_stack)
+        
+        self.expanded_width = 250
+        self._update_sidebar_ui()
+        
+        geom = self.settings.value("geometry")
+        if geom: self.restoreGeometry(geom)
+        
+        state = self.settings.value("windowState")
+        if state: self.restoreState(state)
+        
+        splitter_state = self.settings.value("splitterState")
+        if splitter_state: self.main_splitter.restoreState(splitter_state)
+        
+        self.switch_view(1)
+        
+        dash_st = self.settings.value("dash_table")
+        if dash_st: self.view_dashboard.table.horizontalHeader().restoreState(dash_st)
+            
+        prod_st = self.settings.value("prod_table")
+        if prod_st: self.view_product_db.products_table.horizontalHeader().restoreState(prod_st)
+            
+        serv_st = self.settings.value("serv_table")
+        if serv_st: self.view_product_db.services_table.horizontalHeader().restoreState(serv_st)
 
-    def _make_nav_btn(self, text, index):
-        btn = QPushButton(text, objectName="sidebar_btn")
+    def _make_nav_btn(self, icon, text, index):
+        btn = QPushButton()
+        btn.icon_text = icon
+        btn.full_text = text
         btn.setCheckable(True)
         btn.clicked.connect(lambda: self.switch_view(index))
         return btn
+
+    def _update_sidebar_ui(self):
+        if self.is_collapsed:
+            self.sidebar_content.setFixedWidth(60)
+            self.sidebar_wrapper.setFixedWidth(76) 
+            
+            self.lbl_title.setText("QP")
+            self.lbl_title.setAlignment(Qt.AlignCenter)
+            
+            self.btn_dash.setText(self.btn_dash.icon_text)
+            self.btn_db.setText(self.btn_db.icon_text)
+            
+            theme_icon = "☀️" if self.is_dark else "🌙"
+            self.btn_theme.setText(theme_icon)
+            
+            obj_name = "sidebar_btn_collapsed"
+            self.btn_toggle_sidebar.setText("▶")
+        else:
+            self.sidebar_content.setMinimumWidth(200)
+            self.sidebar_content.setMaximumWidth(16777215)  
+            
+            self.sidebar_wrapper.setMinimumWidth(216)
+            self.sidebar_wrapper.setMaximumWidth(16777215)
+            
+            self.lbl_title.setText("Quotation Pro")
+            self.lbl_title.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            
+            self.btn_dash.setText(f"{self.btn_dash.icon_text}  {self.btn_dash.full_text}")
+            self.btn_db.setText(f"{self.btn_db.icon_text}  {self.btn_db.full_text}")
+            
+            theme_icon = "☀️" if self.is_dark else "🌙"
+            theme_text = "Light Mode" if self.is_dark else "Dark Mode"
+            self.btn_theme.setText(f"{theme_icon}  {theme_text}")
+            
+            obj_name = "sidebar_btn"
+            self.btn_toggle_sidebar.setText("◀")
+            
+        self.btn_dash.setObjectName(obj_name)
+        self.btn_db.setObjectName(obj_name)
+        self.btn_theme.setObjectName(obj_name)
+        
+        self.apply_theme()
+
+    def toggle_sidebar(self):
+        if not self.is_collapsed:
+            self.expanded_width = self.sidebar_wrapper.width()
+            self.is_collapsed = True
+        else:
+            self.is_collapsed = False
+            
+        self._update_sidebar_ui()
+        
+        if not self.is_collapsed:
+            target_w = getattr(self, 'expanded_width', 266)
+            self.main_splitter.setSizes([target_w, self.width() - target_w])
 
     def switch_view(self, index):
         self.content_stack.setCurrentIndex(index)
         self.btn_dash.setChecked(index == 0)
         self.btn_db.setChecked(index == 1)
-        self.btn_quote.setChecked(index == 2)
         
-        if index == 0: self.refresh_dashboard()
-        elif index == 1: self.view_product_db.load_data()
+        if index == 0: 
+            self.refresh_dashboard()
+        elif index == 1: 
+            if not self.view_product_db.all_products:
+                self.view_product_db.load_data()
 
     def refresh_dashboard(self):
         self.view_dashboard.refresh_dashboard(self.catalog_mgr)
 
-    def switch_to_db_selection_mode(self):
-        """Routing from Quote View -> DB view to pick products."""
-        self.switch_view(1)
-        self.view_product_db.enable_selection_mode()
-
-    def finish_product_selection(self, selected_products):
-        """Routing from DB view back to Quote View with data."""
-        for p in selected_products:
-            self.quote_engine.add_item(p, quantity=1)
-            
-        self.switch_view(2)
-        
-        # Block signals on both new tables to prevent UI loops while rendering
-        self.view_new_quote.products_table.blockSignals(True)
-        self.view_new_quote.services_table.blockSignals(True)
-        
-        self.view_new_quote.refresh_ui()
-        
-        self.view_new_quote.products_table.blockSignals(False)
-        self.view_new_quote.services_table.blockSignals(False)
-
     def toggle_theme(self):
         self.is_dark = not self.is_dark
-        self.btn_theme.setText("☀️ Toggle Theme" if not self.is_dark else "🌙 Toggle Theme")
-        self.apply_theme()
+        self._update_sidebar_ui() 
 
     def apply_theme(self):
         self.setStyleSheet(get_stylesheet(self.is_dark))
+        
+    def closeEvent(self, event):
+        self.settings.setValue("geometry", self.saveGeometry())
+        self.settings.setValue("windowState", self.saveState())
+        self.settings.setValue("splitterState", self.main_splitter.saveState())
+        self.settings.setValue("is_dark", self.is_dark)
+        self.settings.setValue("sidebar_collapsed", self.is_collapsed)
+        
+        self.settings.setValue("dash_table", self.view_dashboard.table.horizontalHeader().saveState())
+        self.settings.setValue("prod_table", self.view_product_db.products_table.horizontalHeader().saveState())
+        self.settings.setValue("serv_table", self.view_product_db.services_table.horizontalHeader().saveState())
+        
+        event.accept()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = MainWindow()
+    if getattr(sys, 'frozen', False):
+        pyi_splash.close()
     window.show()
     sys.exit(app.exec())

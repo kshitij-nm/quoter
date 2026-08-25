@@ -1,34 +1,38 @@
 import logging
 from datetime import datetime
-from typing import Optional
+from typing import Dict
 from .models import Product, QuoteItem, ClientDetails, Quotation
 
 logger = logging.getLogger(__name__)
 
 class QuoteEngine:
     def __init__(self):
-        self.current_quote: Optional[Quotation] = None
+        self.carts: Dict[str, Quotation] = {}
 
-    def start_new_quote(self, client: ClientDetails, tax_rate: float = 0.0) -> str:
-        # Format: QT-YYYYMMDD-HHMMSS
-        quote_id = f"QT-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-        self.current_quote = Quotation(quote_id=quote_id, client=client, tax_rate=tax_rate)
-        return quote_id
+    def get_cart(self, customer_name: str) -> Quotation:
+        name_key = customer_name.strip() if customer_name.strip() else "Walk-in Customer"
+        
+        if name_key not in self.carts:
+            quote_id = f"QT-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+            client = ClientDetails(name=name_key, company="", email="")
+            self.carts[name_key] = Quotation(quote_id=quote_id, client=client)
+            
+        return self.carts[name_key]
 
-    def add_item(self, product: Product, quantity: int = 1, discount_percent: float = 0.0):
-        if self.current_quote:
-            self.current_quote.items.append(
-                QuoteItem(product=product, quantity=quantity, discount_percent=discount_percent)
-            )
+    def add_to_cart(self, customer_name: str, product: Product, quantity: int = 1):
+        cart = self.get_cart(customer_name)
+        for item in cart.items:
+            if item.product.name == product.name:
+                item.quantity += quantity
+                return
+        cart.items.append(QuoteItem(product=product, quantity=quantity))
 
-    def remove_item(self, index: int):
-        if self.current_quote and 0 <= index < len(self.current_quote.items):
-            self.current_quote.items.pop(index)
+    def remove_from_cart(self, customer_name: str, index: int):
+        cart = self.get_cart(customer_name)
+        if 0 <= index < len(cart.items):
+            cart.items.pop(index)
 
-    def get_summary(self) -> dict:
-        if not self.current_quote: return {}
-        return {
-            "subtotal": self.current_quote.subtotal,
-            "tax_amount": self.current_quote.tax_amount,
-            "total": self.current_quote.total
-        }
+    def clear_cart(self, customer_name: str):
+        name_key = customer_name.strip() if customer_name.strip() else "Walk-in Customer"
+        if name_key in self.carts:
+            del self.carts[name_key]
