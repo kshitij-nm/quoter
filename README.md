@@ -38,6 +38,6 @@ Ensure you have Python 3.8 or higher installed on your system.
 
 ### 2. Clone the Repository
 ```bash
-git clone [https://github.com/yourusername/quotation-pro.git](https://github.com/yourusername/quotation-pro.git)
+git clone [https://github.com/kshitij-nm/quoter.git](https://github.com/kshitij-nm/quoter.git)
 cd quotation-pro
 ```
